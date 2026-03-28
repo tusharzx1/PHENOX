@@ -1,0 +1,7 @@
+[
+  "function addBatch(uint256 weight, uint256 purity, string memory location, string memory certification, bool isPublic) external",
+  "function updateBatchVisibility(uint256 id, bool newIsPublic) external",
+  "function removeBatch(uint256 id) external",
+  "function getBatch(uint256 id) external view returns (tuple(uint256 id, uint256 weight, uint256 purity, string location, string certification, bool isPublic, uint256 timestamp, address addedBy))",
+  "function getTotalBatches() external view returns (uint256)"
+]
