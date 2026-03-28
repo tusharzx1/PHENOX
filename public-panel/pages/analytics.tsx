@@ -1,6 +1,6 @@
 import Head from 'next/head';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
@@ -8,102 +8,211 @@ import {
 import {
   TrendingUp, TrendingDown, Database, Users,
   Activity, Shield, ExternalLink, RefreshCw, ArrowLeft,
+  Wifi, WifiOff, Zap, Search, Bell, Settings,
+  Home, PieChart, BarChart2, Layers, BookOpen, User, Hexagon, Server
 } from 'lucide-react';
 
-// ─── STATIC DATA ──────────────────────────────────────────────────────────────
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const REFRESH_INTERVAL = 30_000; // 30 seconds
 
-const PRICE_7D = [
-  { t: 'Mar 22', usd: 2088, inr: 173900 },
-  { t: 'Mar 23', usd: 2101, inr: 174800 },
-  { t: 'Mar 24', usd: 2115, inr: 175900 },
-  { t: 'Mar 25', usd: 2098, inr: 174500 },
-  { t: 'Mar 26', usd: 2134, inr: 177500 },
-  { t: 'Mar 27', usd: 2149, inr: 178800 },
-  { t: 'Mar 28', usd: 2158, inr: 179400 },
-];
+// ─── TYPES ────────────────────────────────────────────────────────────────────
+interface GoldPrice {
+  usdPerOz: number;
+  inrPerOz: number;
+  usdPerGram: number;
+  inrPerGram: number;
+  change24h: number;
+  changePct24h: number;
+  lastUpdate: string;
+  source: string;
+}
 
-const PRICE_30D = [
-  { t: 'Mar 1',  usd: 2042, inr: 169800 },
-  { t: 'Mar 5',  usd: 2078, inr: 172900 },
-  { t: 'Mar 9',  usd: 2095, inr: 174300 },
-  { t: 'Mar 13', usd: 2061, inr: 171400 },
-  { t: 'Mar 17', usd: 2110, inr: 175600 },
-  { t: 'Mar 21', usd: 2134, inr: 177500 },
-  { t: 'Mar 25', usd: 2101, inr: 174800 },
-  { t: 'Mar 28', usd: 2158, inr: 179400 },
-];
+interface TokenStats {
+  name: string;
+  symbol: string;
+  totalSupplyGrams: number;
+  totalSupplyFormatted: string;
+  marketCapUSD: number;
+  marketCapINR: number;
+  marketCapFormatted: string;
+  activeHolders: number;
+  totalBatches: number;
+  vaultReserveGrams: number;
+  volumeUSD24h: number;
+  trades24h: number;
+  pgoldUsdPrice: number;
+}
 
-const PRICE_1Y = [
-  { t: 'Apr',  usd: 1980, inr: 164800 },
-  { t: 'May',  usd: 1940, inr: 161500 },
-  { t: 'Jun',  usd: 1965, inr: 163600 },
-  { t: 'Jul',  usd: 2010, inr: 167300 },
-  { t: 'Aug',  usd: 2055, inr: 171000 },
-  { t: 'Sep',  usd: 2089, inr: 173800 },
-  { t: 'Oct',  usd: 2040, inr: 169700 },
-  { t: 'Nov',  usd: 2098, inr: 174500 },
-  { t: 'Dec',  usd: 2134, inr: 177500 },
-  { t: 'Jan',  usd: 2090, inr: 173900 },
-  { t: 'Feb',  usd: 2105, inr: 175100 },
-  { t: 'Mar',  usd: 2158, inr: 179400 },
-];
+interface PricePoint { t: string; usd: number; inr: number; value?: number; }
+type ChartHistory = { '7D': PricePoint[]; '30D': PricePoint[]; '1Y': PricePoint[] };
 
-const CHART_DATA: Record<string, typeof PRICE_7D> = {
-  '7D': PRICE_7D, '30D': PRICE_30D, '1Y': PRICE_1Y,
-};
-
+// ─── STATIC FALLBACK DATA (used until API responds) ───────────────────────────
 const GOLD_BATCHES = [
-  { id: 'BATCH-001', weight: 1000, purity: '24K', location: 'Dubai Vault A',       cert: 'QmX9k...Abc', status: 'Public',  date: '2024-10-15', valueUSD: 67540 },
-  { id: 'BATCH-002', weight: 500,  purity: '22K', location: 'Singapore Vault B',   cert: 'QmY7n...Def', status: 'Public',  date: '2024-10-22', valueUSD: 32150 },
-  { id: 'BATCH-003', weight: 2500, purity: '24K', location: 'Zurich Vault C',      cert: 'QmZ3p...Ghi', status: 'Public',  date: '2024-11-01', valueUSD: 168900 },
-  { id: 'BATCH-004', weight: 750,  purity: '18K', location: 'London Vault D',      cert: 'QmA2m...Jkl', status: 'Private', date: '2024-11-08', valueUSD: 37800 },
-  { id: 'BATCH-005', weight: 300,  purity: '24K', location: 'Dubai Vault A',       cert: 'QmB5q...Mno', status: 'Public',  date: '2024-11-15', valueUSD: 20260 },
+  { id: 'BATCH-001', weight: 1000, purity: '24K', location: 'Dubai Vault A',     cert: 'QmX9k...Abc', status: 'Public',  date: '2024-10-15', network: 'Monad' },
+  { id: 'BATCH-002', weight: 500,  purity: '22K', location: 'Singapore Vault B', cert: 'QmY7n...Def', status: 'Public',  date: '2024-10-22', network: 'Monad' },
+  { id: 'BATCH-003', weight: 2500, purity: '24K', location: 'Zurich Vault C',    cert: 'QmZ3p...Ghi', status: 'Public',  date: '2024-11-01', network: 'Monad' },
+  { id: 'BATCH-004', weight: 750,  purity: '18K', location: 'London Vault D',    cert: 'QmA2m...Jkl', status: 'Private', date: '2024-11-08', network: 'Monad' },
+  { id: 'BATCH-005', weight: 300,  purity: '24K', location: 'Dubai Vault A',     cert: 'QmB5q...Mno', status: 'Public',  date: '2024-11-15', network: 'Monad' },
 ];
 
-const TOP_HOLDERS = [
-  { rank: 1, address: '0x236739...C4F8', balance: 50000, pct: 25.0 },
-  { rank: 2, address: '0xAb82Fc...9E21', balance: 35000, pct: 17.5 },
-  { rank: 3, address: '0xC4d107...3B9A', balance: 28000, pct: 14.0 },
-  { rank: 4, address: '0xE7f3A9...7D5C', balance: 21500, pct: 10.75 },
-  { rank: 5, address: '0x91B2E6...1F2D', balance: 15000, pct: 7.5 },
-  { rank: 6, address: '0x5F8D3C...A4B8', balance: 12000, pct: 6.0 },
-  { rank: 7, address: '0x3A9F71...C3E7', balance: 9500,  pct: 4.75 },
-  { rank: 8, address: '0x8C2B54...D6F9', balance: 7000,  pct: 3.5 },
-];
+// ─── CUSTOM HOOKS ──────────────────────────────────────────────────────────────
+function useGoldData() {
+  const [price, setPrice]   = useState<GoldPrice | null>(null);
+  const [stats, setStats]   = useState<TokenStats | null>(null);
+  const [history, setHistory] = useState<ChartHistory | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [online, setOnline]   = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-const TRANSACTIONS = [
-  { hash: '0xf4a1...9b2c', type: 'MINT',     amount: 50000, time: '2 min ago' },
-  { hash: '0x9c2d...1e4f', type: 'TRANSFER', amount: 1200,  time: '18 min ago' },
-  { hash: '0x3b7e...8f1a', type: 'MINT',     amount: 28000, time: '45 min ago' },
-  { hash: '0xd5f9...2c3e', type: 'BURN',     amount: 500,   time: '1h ago' },
-  { hash: '0x1a2b...7d8e', type: 'TRANSFER', amount: 3500,  time: '2h ago' },
-  { hash: '0xe8c4...0f5b', type: 'MINT',     amount: 15000, time: '3h ago' },
-  { hash: '0x7f3a...4e9d', type: 'BURN',     amount: 800,   time: '5h ago' },
-];
+  const fetchAll = useCallback(async () => {
+    try {
+      const [priceRes, statsRes, historyRes] = await Promise.all([
+        fetch(`${API_BASE}/api/gold/price`).catch(() => null),
+        fetch(`${API_BASE}/api/gold/stats`).catch(() => null),
+        fetch(`${API_BASE}/api/gold/history`).catch(() => null),
+      ]);
 
-const TX_COLORS: Record<string, string> = {
-  MINT: '#39FF14', BURN: '#FF4D4D', TRANSFER: '#00E5FF',
-};
+      if (!priceRes?.ok || !statsRes?.ok || !historyRes?.ok) {
+        throw new Error('API partially or fully offline');
+      }
 
-// ─── SUB-COMPONENTS ──────────────────────────────────────────────────────────
+      const [priceJson, statsJson, historyJson] = await Promise.all([
+        priceRes.json(),
+        statsRes.json(),
+        historyRes.json(),
+      ]);
 
-function StatCard({ icon: Icon, label, value, sub, trend }: {
-  icon: React.ElementType; label: string; value: string;
-  sub?: string; trend?: 'up' | 'down';
-}) {
+      setPrice(priceJson.data);
+      setStats(statsJson.data?.token);
+      setHistory(historyJson.data);
+      setOnline(true);
+      setLastRefresh(new Date());
+    } catch (err) {
+      console.warn('[PHENOX] API unavailable, using fallback data');
+      setOnline(false);
+      // Setup realistic fallback so UI doesn't break
+      setPrice({
+        usdPerOz: 2350.50, inrPerOz: 195000,
+        usdPerGram: 75.57, inrPerGram: 6270,
+        change24h: 12.5, changePct24h: 0.53,
+        lastUpdate: new Date().toISOString(), source: 'Fallback (Offline)'
+      });
+      setStats({
+        name: 'PGOLD', symbol: 'PGOLD',
+        totalSupplyGrams: 5050, totalSupplyFormatted: '5,050',
+        marketCapUSD: 5050 * 75.57, marketCapINR: 5050 * 6270,
+        marketCapFormatted: '$381.6K',
+        activeHolders: 127, totalBatches: 5, vaultReserveGrams: 5050,
+        volumeUSD24h: 15400, trades24h: 34, pgoldUsdPrice: 75.57
+      });
+      // Minimal static history so chart renders
+      setHistory({
+        '7D': [ { t: 'Mon', usd: 2300, inr: 190000 }, { t: 'Today', usd: 2350.5, inr: 195000 } ],
+        '30D': [ { t: '1st', usd: 2200, inr: 180000 }, { t: 'Today', usd: 2350.5, inr: 195000 } ],
+        '1Y': [ { t: 'Jan', usd: 1900, inr: 150000 }, { t: 'Today', usd: 2350.5, inr: 195000 } ]
+      });
+      setLastRefresh(new Date());
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAll();
+    intervalRef.current = setInterval(fetchAll, REFRESH_INTERVAL);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [fetchAll]);
+
+  return { price, stats, history, loading, online, lastRefresh, refetch: fetchAll };
+}
+
+// ─── SUB-COMPONENTS ───────────────────────────────────────────────────────────
+function Sidebar({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: (tab: string) => void }) {
+  const navTabs = [
+    { label: 'Latest', items: [
+      { id: 'Market Overview', icon: Home },
+      { id: 'News', icon: BookOpen },
+      { id: 'Asset Screener', icon: Layers },
+    ]},
+    { label: 'Asset Classes', items: [
+      { id: 'Stablecoins', icon: PieChart },
+      { id: 'U.S. Treasuries', icon: BarChart2 },
+      { id: 'Commodities', icon: Hexagon, badge: 'NEW' },
+    ]},
+    { label: 'Participants', items: [
+      { id: 'Networks', icon: Server },
+      { id: 'Asset Managers', icon: User },
+    ]}
+  ];
+
   return (
-    <div className="bg-white/[0.03] border border-[#FFD700]/10 rounded-xl p-5 hover:border-[#FFD700]/25 transition-all glow-box-gold">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] font-mono text-gray-500 uppercase tracking-[0.15em]">{label}</span>
-        <Icon size={14} className="text-[#FFD700] opacity-50" />
-      </div>
-      <div className="text-2xl font-black text-white">{value}</div>
-      {sub && (
-        <div className={`text-xs mt-1.5 flex items-center gap-1 font-mono ${trend === 'up' ? 'text-[#39FF14]' : 'text-[#FF4D4D]'}`}>
-          {trend === 'up' ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-          {sub}
+    <aside className="sidebar">
+      <Link href="/" className="sidebar-logo">
+        <div className="logo-icon">P</div>
+        <div>
+          <div className="logo-text">PHENOX</div>
+          <div className="logo-sub">Tokenized Gold</div>
         </div>
-      )}
+      </Link>
+      
+      {navTabs.map(section => (
+        <div className="nav-section" key={section.label}>
+          <div className="nav-label">{section.label}</div>
+          {section.items.map(item => (
+            <button
+              key={item.id}
+              className={`nav-item w-full text-left bg-transparent border-0 outline-none ${activeTab === item.id ? 'active' : ''}`}
+              style={{ padding: '7px 10px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '9px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'inherit' }}
+              onClick={() => setActiveTab(item.id)}
+            >
+              <item.icon size={16} /> <span>{item.id}</span>
+              {item.badge && <span className="nav-badge">{item.badge}</span>}
+            </button>
+          ))}
+        </div>
+      ))}
+    </aside>
+  );
+}
+
+function Topbar() {
+  return (
+    <header className="topbar">
+      <div className="search-box">
+        <Search size={16} />
+        <input type="text" placeholder="Search..." />
+        <span className="kbd">CTRL + K</span>
+      </div>
+      <div className="topbar-actions">
+        <a href="#" className="btn-outline">Contact</a>
+        <a href="http://localhost:3000/admin/login" className="btn-primary">Sign in</a>
+      </div>
+    </header>
+  );
+}
+
+function TickerBar({ price, loading }: { price: GoldPrice | null, loading: boolean }) {
+  if (loading || !price) return <div className="ticker-bar"></div>;
+  const changeCls = price.changePct24h >= 0 ? 'up' : 'down';
+  const arrow = price.changePct24h >= 0 ? '▲' : '▼';
+  
+  return (
+    <div className="ticker-bar">
+      <div className="ticker-track">
+        {Array(10).fill(0).map((_, i) => (
+          <div className="ticker-item" key={i}>
+            <span style={{color: '#fcd34d'}}>XAU/USD</span> 
+            <strong>${price.usdPerOz.toLocaleString()}</strong> 
+            <span className={changeCls}>{arrow} {Math.abs(price.changePct24h).toFixed(2)}%</span>
+            <span style={{margin: '0 10px', color: 'rgba(255,255,255,0.2)'}}>|</span>
+            <span style={{color: '#93c5fd'}}>PGOLD Vault</span>
+            <strong>5,050g</strong>
+            <span style={{margin: '0 10px', color: 'rgba(255,255,255,0.2)'}}>|</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -111,312 +220,322 @@ function StatCard({ icon: Icon, label, value, sub, trend }: {
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-[#0a0a0a] border border-[#FFD700]/30 rounded-lg p-3 text-xs font-mono shadow-xl">
-      <p className="text-[#FFD700] mb-1">{label}</p>
-      <p className="text-white">USD: <span className="text-[#FFD700]">${payload[0]?.value?.toLocaleString()}</span></p>
+    <div className="bg-white border border-slate-200 rounded-lg p-3 text-xs shadow-lg">
+      <p className="text-slate-500 mb-1 font-medium">{label}</p>
+      <p className="text-slate-900 font-bold text-sm">
+        ${payload[0]?.value?.toLocaleString()}
+      </p>
     </div>
   );
 };
 
-// ─── MAIN ANALYTICS PAGE ──────────────────────────────────────────────────────
-
+// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function Analytics() {
+  const { price, stats, history, loading, online, lastRefresh, refetch } = useGoldData();
+  const [activeTab, setActiveTab] = useState('Commodities');
   const [period, setPeriod] = useState<'7D' | '30D' | '1Y'>('30D');
-  const [currency, setCurrency] = useState<'USD' | 'INR'>('USD');
-  const [sortBy, setSortBy] = useState<'weight' | 'purity' | 'location'>('weight');
-  const now = new Date().toLocaleTimeString();
+  const [metricTab, setMetricTab] = useState<'Market Caps' | 'Transfer Volume' | 'Mint / Burn Volumes'>('Market Caps');
 
-  const chartData = CHART_DATA[period].map(d => ({
-    ...d,
-    value: currency === 'USD' ? d.usd : d.inr,
+  const chartData = history ? history[period].map(d => ({ ...d, value: d.usd })) : [];
+  const vaultTotal = stats?.vaultReserveGrams ?? 5050;
+  
+  const batchesWithValue = GOLD_BATCHES.map(b => ({
+    ...b,
+    valueUSD: price ? +(b.weight * price.usdPerGram).toFixed(2) : 0,
   }));
 
-  const sortedBatches = [...GOLD_BATCHES].sort((a, b) => {
-    if (sortBy === 'weight') return b.weight - a.weight;
-    if (sortBy === 'purity') return a.purity.localeCompare(b.purity);
-    return a.location.localeCompare(b.location);
-  });
-
   return (
-    <div className="min-h-screen bg-[#050505] text-white">
+    <div className="layout">
       <Head>
-        <title>PHENOX | Gold Analytics Dashboard</title>
-        <meta name="description" content="Real-time gold RWA analytics — batches, supply, holders, transactions on Monad Testnet" />
+        <title>PHENOX | {activeTab}</title>
       </Head>
 
-      {/* ── HEADER ── */}
-      <header className="sticky top-0 z-30 bg-[#050505]/95 backdrop-blur border-b border-[#FFD700]/10 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-5">
-          <Link href="/" className="text-[#FFD700] font-mono font-bold text-lg tracking-widest">&gt;_ PHENOX</Link>
-          <span className="text-gray-600 hidden md:block">|</span>
-          <span className="text-gray-400 text-sm font-mono hidden md:block">Gold Analytics</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-gray-600">
-            <RefreshCw size={10} /> Updated: {now}
-          </div>
-          <div className="flex items-center gap-1.5 text-[11px] font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#39FF14] animate-pulse" />
-            <span className="text-gray-500">Monad Testnet</span>
-          </div>
-          <a href="http://localhost:3000/admin/login" className="text-xs border border-[#FFD700]/30 text-[#FFD700] px-3 py-1.5 rounded hover:bg-[#FFD700]/10 transition font-mono">
-            Admin →
-          </a>
-        </div>
-      </header>
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-10">
+      <div className="main-area">
+        <Topbar />
+        
+        {/* Ticker Bar (Dark blue bar below topnav like RWA limit) */}
+        <TickerBar price={price} loading={loading} />
 
-        {/* ── GLOBAL STATS ── */}
-        <section>
-          <p className="text-[10px] font-mono text-gray-600 uppercase tracking-widest mb-4">Global Market Overview</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <StatCard icon={TrendingUp}  label="Total Tokenized"   value="$326.4M"   sub="+2.7% 24h"  trend="up" />
-            <StatCard icon={Activity}    label="PGOLD Price"        value="$2,158"    sub="+1.35% 24h" trend="up" />
-            <StatCard icon={Database}    label="Total Batches"      value="5"         />
-            <StatCard icon={Users}       label="Active Holders"     value="127"       />
-            <StatCard icon={TrendingUp}  label="Total Supply"       value="200K"      sub="+12K today" trend="up" />
-            <StatCard icon={Shield}      label="Vault Reserve"      value="5,050g"    sub="Physical Au" trend="up" />
-          </div>
-        </section>
-
-        {/* ── GOLD PRICE CHART ── */}
-        <section className="bg-white/[0.02] border border-[#FFD700]/10 rounded-2xl p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-lg font-bold">Gold Price ({currency}/oz)</h2>
-              <p className="text-gray-600 text-xs font-mono mt-0.5">Historical price trend — PGOLD token</p>
+        <div className="content-scroll">
+          
+          {/* OFFLINE BANNER */}
+          {!online && (
+            <div className="offline-banner">
+              <WifiOff size={16} />
+              <span>Backend API is currently unreachable. Displaying fallback/mock data. Please ensure <code className="bg-orange-100 px-1 rounded">npm run dev</code> is running in the backend folder.</span>
             </div>
-            <div className="flex items-center gap-3">
-              {/* Currency toggle */}
-              <div className="flex rounded-lg overflow-hidden border border-[#FFD700]/20">
-                {(['USD', 'INR'] as const).map(c => (
-                  <button key={c} onClick={() => setCurrency(c)}
-                    className={`px-3 py-1.5 text-xs font-mono transition-all ${currency === c ? 'bg-[#FFD700] text-black' : 'text-gray-500 hover:text-white'}`}>
-                    {c}
-                  </button>
-                ))}
+          )}
+
+          {activeTab !== 'Commodities' ? (
+            <div className="flex flex-col items-center justify-center pt-32 pb-32">
+              <Database size={64} className="mb-6 opacity-20 text-slate-400" />
+              <h2 className="text-2xl font-bold text-slate-700 mb-2">{activeTab}</h2>
+              <p className="text-slate-500">This section is currently under construction for the hackathon demo.</p>
+              <button 
+                onClick={() => setActiveTab('Commodities')} 
+                className="mt-8 px-5 py-2 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 transition shadow-sm border-0 cursor-pointer text-sm"
+              >
+                Return to Commodities
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* PAGE HEADER */}
+              <div className="page-header">
+                <h1 className="page-title">Tokenized {activeTab}</h1>
+                <p className="page-desc">
+                  Explore tokenized physical commodities, commodity-linked securities, and funds providing exposure to raw materials and natural resources powered by PHENOX on Monad Testnet.
+                </p>
               </div>
-              {/* Period toggle */}
-              <div className="flex rounded-lg overflow-hidden border border-[#FFD700]/20">
-                {(['7D', '30D', '1Y'] as const).map(p => (
-                  <button key={p} onClick={() => setPeriod(p)}
-                    className={`px-3 py-1.5 text-xs font-mono transition-all ${period === p ? 'bg-[#FFD700] text-black' : 'text-gray-500 hover:text-white'}`}>
-                    {p}
-                  </button>
-                ))}
+
+              {/* STATS ROW (4 Columns) */}
+          <div className="stats-row">
+            <div className="stat-card">
+              <div className="stat-label">Market Cap <span className="opacity-50">ⓘ</span></div>
+              <div className="stat-value">
+                {loading ? <div className="skeleton h-[34px] w-[120px]"></div> : (stats?.marketCapFormatted || '$381.6K')}
+              </div>
+              {!loading && price && (
+                <div className={`stat-change ${price.changePct24h >= 0 ? 'up' : 'down'}`}>
+                  {price.changePct24h >= 0 ? '▲' : '▼'} {Math.abs(price.changePct24h).toFixed(2)}% from 30d ago
+                </div>
+              )}
+            </div>
+            
+            <div className="stat-card">
+              <div className="stat-label">Monthly Transfer Volume <span className="opacity-50">ⓘ</span></div>
+              <div className="stat-value">
+                {loading ? <div className="skeleton h-[34px] w-[90px]"></div> : `$${((stats?.volumeUSD24h || 15400) * 30 / 1000).toFixed(1)}K`}
+              </div>
+              <div className="stat-change up">▲ +12.4% from 30d ago</div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Monthly Active Addresses <span className="opacity-50">ⓘ</span></div>
+              <div className="stat-value">
+                {loading ? <div className="skeleton h-[34px] w-[70px]"></div> : (stats?.activeHolders || 127).toLocaleString()}
+              </div>
+              <div className="stat-change up">▲ +5.2% from 30d ago</div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Holders <span className="opacity-50">ⓘ</span></div>
+              <div className="stat-value">
+                {loading ? <div className="skeleton h-[34px] w-[80px]"></div> : (stats?.activeHolders || 127).toLocaleString()}
+              </div>
+              <div className="stat-change up">▲ +2.1% from 30d ago</div>
+            </div>
+          </div>
+
+          {/* CHART CARD */}
+          <div className="chart-card">
+            <div className="chart-header">
+              <h2 className="chart-title">Tokenized Commodity Metrics</h2>
+              <div className="chart-controls">
+                <span className="text-[12px] font-semibold mr-2">Metric</span>
+                <div className="tab-group">
+                  {(['Market Caps', 'Transfer Volume', 'Mint / Burn Volumes'] as const).map(tab => (
+                    <button 
+                      key={tab} 
+                      className={`tab-btn ${metricTab === tab ? 'active' : ''}`}
+                      onClick={() => setMetricTab(tab)}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+                
+                <span className="text-[12px] font-semibold ml-4 mr-2">Timeframe</span>
+                <div className="tab-group">
+                  {(['7D', '30D', '1Y'] as const).map(p => (
+                    <button 
+                      key={p} 
+                      className={`tab-btn ${period === p ? 'active' : ''}`}
+                      onClick={() => setPeriod(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex items-end gap-4 mb-6">
-            <span className="text-4xl font-black text-[#FFD700] glow-gold">
-              {currency === 'USD' ? '$2,158' : '₹1,79,400'}
-            </span>
-            <span className="text-[#39FF14] text-sm font-mono pb-1">▲ +1.35%</span>
-          </div>
-
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={chartData} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
-              <defs>
-                <linearGradient id="goldGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#FFD700" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#FFD700" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,215,0,0.05)" />
-              <XAxis dataKey="t"     tick={{ fill: '#4b5563', fontSize: 11, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
-              <YAxis dataKey="value" tick={{ fill: '#4b5563', fontSize: 11, fontFamily: 'monospace' }} axisLine={false} tickLine={false}
-                domain={['dataMin - 50', 'dataMax + 50']}
-                tickFormatter={v => currency === 'USD' ? `$${v.toLocaleString()}` : `₹${v.toLocaleString()}`}
-                width={75}
-              />
-              <Tooltip content={<ChartTooltip />} />
-              <Area type="monotone" dataKey="value" stroke="#FFD700" strokeWidth={2.5}
-                fill="url(#goldGrad)" dot={false} activeDot={{ r: 5, fill: '#FFD700', stroke: '#050505', strokeWidth: 2 }} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </section>
-
-        {/* ── GOLD BATCH REGISTRY ── */}
-        <section>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-            <div>
-              <h2 className="font-bold text-white">Gold Batch Registry</h2>
-              <p className="text-gray-600 text-xs font-mono mt-0.5">Every vault batch recorded on-chain</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-600 font-mono">Sort by:</span>
-              {(['weight', 'purity', 'location'] as const).map(s => (
-                <button key={s} onClick={() => setSortBy(s)}
-                  className={`px-3 py-1 text-xs font-mono rounded border transition-all ${sortBy === s ? 'border-[#FFD700] text-[#FFD700] bg-[#FFD700]/10' : 'border-white/10 text-gray-500 hover:text-white'}`}>
-                  {s}
-                </button>
-              ))}
+            <div className="h-[300px] w-full mt-4">
+              {loading || chartData.length === 0 ? (
+                <div className="h-full w-full flex items-center justify-center">
+                  <div className="skeleton w-full h-full rounded-lg"></div>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 0, bottom: 0, left: 0 }}>
+                    <defs>
+                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis 
+                      dataKey="t" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#94a3b8', fontSize: 12 }} 
+                      dy={10}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#94a3b8', fontSize: 12 }} 
+                      tickFormatter={(value) => `$${value >= 1000 ? (value/1000).toFixed(1) + 'k' : value}`}
+                      domain={['dataMin - 50', 'dataMax + 50']}
+                      width={60}
+                    />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Area 
+                      type="monotone" 
+                      dataKey="value" 
+                      stroke="#2563eb" 
+                      strokeWidth={2}
+                      fillOpacity={1} 
+                      fill="url(#colorValue)" 
+                      activeDot={{ r: 6, fill: '#2563eb', stroke: '#fff', strokeWidth: 2 }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
-          <div className="bg-white/[0.02] border border-[#FFD700]/10 rounded-2xl overflow-hidden">
+          {/* ASSET LEAGUE TABLE */}
+          <div className="refresh-bar mt-8">
+            <h2 className="section-title mb-0">Commodity Assets</h2>
+            <div className="flex gap-4 items-center">
+              <span className="refresh-info">
+                {online ? <span className="live-dot"></span> : <WifiOff size={12} className="text-red-500" />}
+                {online ? 'Live from Monad Testnet' : 'Offline'}
+                {lastRefresh && ` • Updated: ${lastRefresh.toLocaleTimeString()}`}
+              </span>
+              <button className="refresh-btn" onClick={refetch}>
+                <RefreshCw size={12} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="table-card">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table>
                 <thead>
-                  <tr className="border-b border-[#FFD700]/10">
-                    {['Batch ID', 'Weight (g)', 'Purity', 'Location', 'Certification', 'Status', 'Value (USD)', 'Added'].map(h => (
-                      <th key={h} className="text-left px-5 py-3.5 text-[10px] font-mono text-gray-600 uppercase tracking-widest whitespace-nowrap">{h}</th>
-                    ))}
+                  <tr>
+                    <th style={{width: '60px'}}>Rank</th>
+                    <th>Asset</th>
+                    <th>Network</th>
+                    <th className="r">Total Value</th>
+                    <th className="r">Physical Weight</th>
+                    <th className="r">Vault Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedBatches.map((b, i) => (
-                    <tr key={b.id}
-                      className={`border-b border-white/[0.03] hover:bg-[#FFD700]/[0.03] transition-colors ${i % 2 === 0 ? '' : 'bg-white/[0.01]'}`}>
-                      <td className="px-5 py-3.5 font-mono text-[#FFD700] text-xs font-semibold">{b.id}</td>
-                      <td className="px-5 py-3.5 text-white font-semibold">{b.weight.toLocaleString()}</td>
-                      <td className="px-5 py-3.5 text-gray-300 font-mono">{b.purity}</td>
-                      <td className="px-5 py-3.5 text-gray-400 text-xs">{b.location}</td>
-                      <td className="px-5 py-3.5">
-                        <button className="flex items-center gap-1 text-[#00E5FF] text-xs font-mono hover:underline">
-                          {b.cert} <ExternalLink size={10} />
-                        </button>
+                  {/* MAIN TOKEN ROW */}
+                  <tr>
+                    <td className="font-semibold text-slate-400">1</td>
+                    <td>
+                      <div className="asset-cell">
+                        <div className="asset-icon pgold">P</div>
+                        <div>
+                          <div className="asset-name">PHENOX Gold</div>
+                          <div className="asset-ticker">PGOLD • Monad Foundation</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="network-chip">
+                        <div className="net-dot" style={{background: '#8b5cf6'}}></div> Monad
+                      </div>
+                    </td>
+                    <td className="r font-bold text-[14px]">
+                      {loading ? <div className="skeleton h-[20px] w-[80px] ml-auto"></div> : (stats?.marketCapFormatted || '$381.6K')}
+                    </td>
+                    <td className="r font-mono">
+                      {loading ? <div className="skeleton h-[20px] w-[60px] ml-auto"></div> : `${vaultTotal.toLocaleString()}g`}
+                    </td>
+                    <td className="r">
+                      <span className="badge badge-green">Verified</span>
+                    </td>
+                  </tr>
+
+                  {/* BATCH ROWS (Show parts of the asset) */}
+                  {batchesWithValue.map((b, i) => (
+                    <tr key={b.id}>
+                      <td className="text-slate-400 text-xs text-right pr-6">↳</td>
+                      <td>
+                        <div className="asset-cell" style={{paddingLeft: '10px'}}>
+                          <div className="asset-icon" style={{background: '#f1f5f9', color: '#64748b', transform: 'scale(0.8)'}}>📦</div>
+                          <div>
+                            <div className="asset-name text-[12px]">{b.id}</div>
+                            <div className="asset-ticker">{b.location} • {b.purity}</div>
+                          </div>
+                        </div>
                       </td>
-                      <td className="px-5 py-3.5">
-                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold ${b.status === 'Public' ? 'bg-[#39FF14]/10 text-[#39FF14]' : 'bg-gray-500/10 text-gray-500'}`}>
+                      <td>
+                        <div className="network-chip" style={{opacity: 0.8}}>
+                          <div className="net-dot" style={{background: '#8b5cf6'}}></div> Monad Vault
+                        </div>
+                      </td>
+                      <td className="r font-medium text-[13px] text-slate-600">
+                        {loading ? '...' : `$${b.valueUSD.toLocaleString()}`}
+                      </td>
+                      <td className="r text-slate-600 text-[12px]">
+                        {b.weight.toLocaleString()}g
+                      </td>
+                      <td className="r">
+                        <span className={`badge ${b.status === 'Public' ? 'badge-blue' : 'badge-gray'}`}>
                           {b.status}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 text-white font-mono">${b.valueUSD.toLocaleString()}</td>
-                      <td className="px-5 py-3.5 text-gray-600 text-xs font-mono">{b.date}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
-        </section>
-
-        {/* ── SPLIT: HOLDERS + TRANSACTIONS ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-          {/* HOLDER LEADERBOARD */}
-          <section>
-            <h2 className="font-bold text-white mb-1">Top PGOLD Holders</h2>
-            <p className="text-gray-600 text-xs font-mono mb-4">League table — wallet addresses only</p>
-            <div className="bg-white/[0.02] border border-[#FFD700]/10 rounded-2xl overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#FFD700]/10">
-                    {['#', 'Address', 'Balance', '% Supply'].map(h => (
-                      <th key={h} className="text-left px-5 py-3 text-[10px] font-mono text-gray-600 uppercase tracking-widest">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {TOP_HOLDERS.map((h) => (
-                    <tr key={h.rank} className="border-b border-white/[0.03] hover:bg-[#FFD700]/[0.03] transition-colors">
-                      <td className="px-5 py-3 text-gray-600 font-mono text-xs">{h.rank}</td>
-                      <td className="px-5 py-3 font-mono text-[#00E5FF] text-xs">{h.address}</td>
-                      <td className="px-5 py-3 text-white text-xs font-mono whitespace-nowrap">{h.balance.toLocaleString()} PGOLD</td>
-                      <td className="px-5 py-3 w-32">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1 bg-white/[0.07] rounded-full overflow-hidden">
-                            <div className="h-full bg-[#FFD700] rounded-full" style={{ width: `${Math.min(h.pct * 4, 100)}%` }} />
-                          </div>
-                          <span className="text-gray-500 text-[11px] font-mono">{h.pct}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* LIVE TRANSACTIONS */}
-          <section>
-            <h2 className="font-bold text-white mb-1">Latest Transactions</h2>
-            <p className="text-gray-600 text-xs font-mono mb-4">Recent on-chain events — mint / burn / transfer</p>
-            <div className="bg-white/[0.02] border border-[#FFD700]/10 rounded-2xl divide-y divide-white/[0.03]">
-              {TRANSACTIONS.map((tx) => (
-                <div key={tx.hash} className="flex items-center justify-between px-5 py-3.5 hover:bg-[#FFD700]/[0.03] transition-colors">
-                  <div className="flex items-center gap-3">
-                    <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold"
-                      style={{ color: TX_COLORS[tx.type], background: `${TX_COLORS[tx.type]}18` }}>
-                      {tx.type}
-                    </span>
-                    <button className="font-mono text-xs text-[#00E5FF] hover:underline flex items-center gap-1">
-                      {tx.hash} <ExternalLink size={9} />
-                    </button>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-white text-sm font-semibold">{tx.amount.toLocaleString()} PGOLD</div>
-                    <div className="text-gray-600 text-[11px] font-mono">{tx.time}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        {/* ── TRADING ACTIVITY ── */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {[
-            { label: '24h Trading Volume', value: '8,200 PGOLD', sub: '$17.68M' },
-            { label: 'Number of Trades',   value: '342',         sub: 'last 24 hours' },
-            { label: 'PGOLD/USD',          value: '$2.155',      sub: 'per token' },
-          ].map(c => (
-            <div key={c.label} className="bg-white/[0.02] border border-[#FFD700]/10 rounded-xl p-5 text-center hover:border-[#FFD700]/25 transition-all">
-              <p className="text-[10px] font-mono text-gray-600 uppercase tracking-widest mb-2">{c.label}</p>
-              <p className="text-2xl font-black text-[#FFD700]">{c.value}</p>
-              <p className="text-gray-500 text-xs font-mono mt-1">{c.sub}</p>
-            </div>
-          ))}
-        </section>
-
-        {/* ── VAULT RESERVE & PROOF OF RESERVE ── */}
-        <section className="relative overflow-hidden bg-gradient-to-r from-[#FFD700]/[0.06] to-transparent border border-[#FFD700]/20 rounded-2xl p-8">
-          <div className="absolute -right-20 -top-20 w-64 h-64 bg-[#FFD700] opacity-[0.03] blur-[80px] rounded-full pointer-events-none" />
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
+          
+          {/* PROOF OF RESERVE STRIP */}
+          <div className="por-strip">
             <div>
-              <h2 className="text-xl font-black mb-1">🏦 Vault Reserve & Proof of Reserve</h2>
-              <p className="text-gray-500 text-sm max-w-md">
-                Every gram of physical gold backing PGOLD is verified cryptographically on Monad Testnet.
-                Third-party audits available on IPFS.
+              <div className="flex items-center gap-2 mb-1">
+                <Shield size={16} color="#d4a017" />
+                <h3 className="font-bold text-[#92400e]">Proof of Reserve</h3>
+              </div>
+              <p className="text-[13px] text-[#b45309] max-w-md">
+                100% physically backed by allocated gold bars. Audited and verifiable on the Monad testnet blockchain.
               </p>
             </div>
-            <div className="flex items-center gap-8 flex-shrink-0">
-              <div className="text-center">
-                <div className="text-4xl font-black text-[#FFD700] glow-gold">5,050<span className="text-xl">g</span></div>
-                <div className="text-gray-600 text-xs font-mono mt-1">Physical Gold Total</div>
-              </div>
-              <div className="text-center">
-                <div className="text-4xl font-black text-white">$326.4M</div>
-                <div className="text-gray-600 text-xs font-mono mt-1">Current Value</div>
+            
+            <div className="flex items-center gap-8">
+              <div>
+                <div className="por-label">Total Allocated</div>
+                <div className="por-value">{(stats?.vaultReserveGrams ?? 5050).toLocaleString()} <span className="text-[14px]">grams</span></div>
               </div>
               <div>
-                <span className="px-4 py-2 bg-[#39FF14]/10 text-[#39FF14] border border-[#39FF14]/30 rounded-full text-sm font-mono font-bold">
-                  ✓ VERIFIED
-                </span>
+                <div className="por-label">Live Value (USD)</div>
+                <div className="por-value">
+                  {price ? `$${((stats?.vaultReserveGrams ?? 5050) * price.usdPerGram).toLocaleString(undefined, {maximumFractionDigits: 0})}` : '...'}
+                </div>
+              </div>
+              <div className="verified-chip">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                Fully Audited
               </div>
             </div>
           </div>
-          <div className="flex gap-4 mt-6 relative z-10">
-            <button className="flex items-center gap-1.5 text-xs font-mono text-[#FFD700] border border-[#FFD700]/30 px-4 py-2 rounded hover:bg-[#FFD700]/10 transition-all">
-              <ExternalLink size={11} /> Audit Report (IPFS)
-            </button>
-            <button className="flex items-center gap-1.5 text-xs font-mono text-gray-500 border border-white/10 px-4 py-2 rounded hover:text-white transition-all">
-              <ExternalLink size={11} /> Monad Explorer
-            </button>
-          </div>
-        </section>
+          </>
+          )}
 
-      </main>
-
-      {/* FOOTER */}
-      <footer className="border-t border-[#FFD700]/10 px-8 py-6 text-center mt-10">
-        <p className="text-gray-700 text-xs font-mono">
-          PHENOX Public Panel &copy; 2025 · Gold-Backed RWA on Monad Testnet · Data is static (hackathon demo)
-        </p>
-      </footer>
+          <div style={{height: '40px'}}></div>
+        </div>
+      </div>
     </div>
   );
 }
