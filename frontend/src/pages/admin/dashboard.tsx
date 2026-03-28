@@ -1,20 +1,26 @@
-import { useUser, useSession } from '@clerk/nextjs';
+import { useUser } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
-import { ethers } from 'ethers';
-import GoldTokenABI from '../../abi/GoldToken.json';
-import GoldBatchABI from '../../abi/GoldBatchManager.json';
 
-const GOLD_TOKEN_ADDRESS = '0x1234567890123456789012345678901234567890'; // Mock replace 
-const BATCH_MANAGER_ADDRESS = '0x0987654321098765432109876543210987654321'; // Mock replace
+type AdminBatchRecord = {
+  batchId: string;
+  weight: number;
+  purity: number;
+  location: string;
+  certification?: string;
+  isPublic: boolean;
+  timestamp?: string;
+  onChain?: {
+    status?: string;
+    txHash?: string;
+    error?: string;
+  };
+};
 
 export default function AdminDashboard() {
   const { isLoaded, isSignedIn, user } = useUser();
-  const { session } = useSession();
-  const [provider, setProvider] = useState<any>(null);
-  const [goldToken, setGoldToken] = useState<any>(null);
-  const [batchManager, setBatchManager] = useState<any>(null);
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
   const [totalSupply, setTotalSupply] = useState('0');
-  const [batches, setBatches] = useState<any[]>([]);
+  const [batches, setBatches] = useState<AdminBatchRecord[]>([]);
   const [goldPrice, setGoldPrice] = useState({ usd: 0, inr: 0 });
   const [status, setStatus] = useState('');
   const [newBatch, setNewBatch] = useState({ weight: '', purity: 24, location: '', certification: '', isPublic: true });
@@ -33,8 +39,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     if ((!isLoaded || !isSignedIn) && !isDemo) return;
     const init = async () => {
-      // Mocking the web3 layer for instant offline demonstration
-      setStatus(`Connected to local simulator via ${userEthAccount}`);
+      setStatus(`Connected to backend sync mode via ${userEthAccount}`);
       try {
         if ((window as any).ethereum) {
            await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
@@ -48,44 +53,84 @@ export default function AdminDashboard() {
     init();
   }, [isLoaded, isSignedIn, isDemo]);
 
+  useEffect(() => {
+    const supply = batches.reduce((acc, batch) => acc + Number(batch.weight || 0), 0);
+    setTotalSupply(supply.toFixed(2));
+  }, [batches]);
+
   const fetchTotalSupply = async () => {
-    const cached = localStorage.getItem('mock_supply') || '50000.0';
-    setTotalSupply(cached);
+    const supply = batches.reduce((acc, batch) => acc + Number(batch.weight || 0), 0);
+    setTotalSupply(supply.toFixed(2));
   };
 
   const fetchBatches = async () => {
-    const cached = JSON.parse(localStorage.getItem('mock_batches') || '[]');
-    setBatches(cached);
+    try {
+      const adminRes = await fetch(`${backendUrl}/api/blockchain/admin/records`);
+      if (adminRes.ok) {
+        const adminData = await adminRes.json();
+        setBatches(adminData.data || []);
+        return;
+      }
+    } catch {
+      // fallback below
+    }
+
+    try {
+      const publicRes = await fetch(`${backendUrl}/api/blockchain/public/records`);
+      const publicData = await publicRes.json();
+      setBatches(publicData.data || []);
+    } catch {
+      setBatches([]);
+    }
   };
 
   const fetchGoldPrice = async () => {
     try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
         const res = await fetch(`${backendUrl}/api/gold-price`);
         const data = await res.json();
         setGoldPrice(data);
     } catch {
-       setGoldPrice({ date: '2024-10-31', price_gram_24k: 73.45, currency: 'USD' });
+       setGoldPrice({ usd: 64, inr: 5312 });
     }
   };
 
   const addBatch = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStatus('Processing transaction on Ledger...');
-    setTimeout(() => {
-      const current = JSON.parse(localStorage.getItem('mock_batches') || '[]');
-      current.push({
-        id: ethers.BigNumber.from(current.length),
-        weight: ethers.BigNumber.from(newBatch.weight),
-        purity: newBatch.purity,
-        location: newBatch.location,
-        certification: newBatch.certification,
-        isPublic: newBatch.isPublic
+    setStatus('Submitting batch to backend and anchoring payload hash on blockchain...');
+
+    const batchId = `BATCH-${Date.now()}`;
+    try {
+      const res = await fetch(`${backendUrl}/api/blockchain/admin/push`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-email': user?.emailAddresses?.[0]?.emailAddress || 'demo@phenox.com',
+        },
+        body: JSON.stringify({
+          batchId,
+          weight: Number(newBatch.weight),
+          purity: Number(newBatch.purity),
+          location: newBatch.location,
+          certification: newBatch.certification,
+          isPublic: newBatch.isPublic,
+          metadataURI: newBatch.certification ? `ipfs://${newBatch.certification}` : '',
+        }),
       });
-      localStorage.setItem('mock_batches', JSON.stringify(current));
-      setStatus(`Batch ${current.length - 1} added successfully by ${userEthAccount.substring(0, 6)}...`);
+
+      const payload = await res.json();
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.message || 'Failed to push batch');
+      }
+
+      const chainStatus = payload?.data?.onChain?.status || 'PENDING';
+      const txHash = payload?.data?.onChain?.txHash;
+      setStatus(`Batch ${batchId} saved. Chain status: ${chainStatus}${txHash ? ` | Tx: ${txHash}` : ''}`);
+
+      setNewBatch({ weight: '', purity: 24, location: '', certification: '', isPublic: true });
       fetchBatches();
-    }, 1500); // 1.5s simulated transaction delay
+    } catch (err: any) {
+      setStatus(`Batch submit failed: ${err?.message || 'unknown error'}`);
+    }
   };
 
   const mintTokens = async () => {
@@ -197,11 +242,12 @@ export default function AdminDashboard() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-700">
-                  <th className="text-left p-2">ID</th>
+                  <th className="text-left p-2">Batch ID</th>
                   <th>Weight (g)</th>
                   <th>Purity</th>
                   <th>Location</th>
                   <th>Public</th>
+                  <th>Chain Status</th>
                   <th>Value (USD)</th>
                   <th>Value (INR)</th>
                   <th>Tokens</th>
@@ -209,15 +255,16 @@ export default function AdminDashboard() {
               </thead>
               <tbody>
                 {batches.map(batch => (
-                  <tr key={batch.id} className="border-b border-gray-700">
-                    <td className="p-2">{batch.id?.toString()}</td>
-                    <td>{batch.weight?.toString()}</td>
+                  <tr key={batch.batchId} className="border-b border-gray-700">
+                    <td className="p-2">{batch.batchId}</td>
+                    <td>{Number(batch.weight).toString()}</td>
                     <td>{batch.purity}K</td>
                     <td>{batch.location}</td>
                     <td>{batch.isPublic ? 'Yes' : 'No'}</td>
+                    <td>{batch.onChain?.status || 'PENDING'}</td>
                     <td>${(Number(batch.weight) * goldPrice.usd).toFixed(2)}</td>
                     <td>₹{(Number(batch.weight) * goldPrice.inr).toFixed(2)}</td>
-                    <td>{batch.weight?.toString()} PGOLD</td>
+                    <td>{Number(batch.weight).toString()} PGOLD</td>
                   </tr>
                 ))}
               </tbody>
