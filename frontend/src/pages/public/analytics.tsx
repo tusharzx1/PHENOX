@@ -1,6 +1,8 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type ElementType } from 'react';
+import { useClerk, useUser } from '@clerk/nextjs';
+import { useRouter } from 'next/router';
 import {
   Activity,
   BarChart3,
@@ -147,6 +149,9 @@ const compactMoney = (value?: number | null) =>
   }).format(Number(value || 0));
 
 export default function PublicAnalytics() {
+  const router = useRouter();
+  const { isLoaded: authLoaded, isSignedIn, user } = useUser();
+  const { signOut } = useClerk();
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
   const [activeTab, setActiveTab] = useState<TabKey>('stablecoins');
   const [isLoading, setIsLoading] = useState(true);
@@ -162,6 +167,13 @@ export default function PublicAnalytics() {
   const [publicLedger, setPublicLedger] = useState<PublicLedgerRecord[]>([]);
 
   const activeTabMeta = useMemo(() => TABS.find((tab) => tab.key === activeTab), [activeTab]);
+
+  useEffect(() => {
+    if (!authLoaded) return;
+    if (!isSignedIn) {
+      router.replace('/public/login');
+    }
+  }, [authLoaded, isSignedIn, router]);
 
   const fetchDashboard = async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -215,10 +227,23 @@ export default function PublicAnalytics() {
   };
 
   useEffect(() => {
+    if (!authLoaded || !isSignedIn) return;
     fetchDashboard(false);
     const interval = setInterval(() => fetchDashboard(true), 30000);
     return () => clearInterval(interval);
-  }, [backendUrl]);
+  }, [backendUrl, authLoaded, isSignedIn]);
+
+  const handleLogout = async () => {
+    await signOut();
+    router.push('/public/login');
+  };
+
+  if (!authLoaded) {
+    return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center font-mono">Loading authentication...</div>;
+  }
+  if (!isSignedIn) {
+    return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center font-mono">Redirecting to login...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-[#050505] text-white">
@@ -236,12 +261,21 @@ export default function PublicAnalytics() {
           <span className="text-gray-400 text-sm hidden md:block font-mono">Unified Dashboard Data Terminal</span>
         </div>
         <div className="flex items-center gap-4">
+          <span className="text-xs text-gray-500 font-mono hidden lg:block">
+            {user?.primaryEmailAddress?.emailAddress || 'Authenticated User'}
+          </span>
           <button
             onClick={() => fetchDashboard(false)}
             className="text-xs border border-[#FFD700]/30 text-[#FFD700] px-3 py-1.5 rounded hover:bg-[#FFD700]/10 transition-all font-mono flex items-center gap-2"
           >
             <RefreshCw size={12} />
             Refresh
+          </button>
+          <button
+            onClick={handleLogout}
+            className="text-xs border border-red-400/40 text-red-300 px-3 py-1.5 rounded hover:bg-red-400/10 transition-all font-mono"
+          >
+            Logout
           </button>
           <span className="text-xs text-gray-500 font-mono hidden md:flex items-center gap-2">
             Last updated: {lastUpdated}
@@ -417,7 +451,7 @@ export default function PublicAnalytics() {
                 <div className="space-y-3">
                   {news.isFallback && (
                     <div className="text-xs font-mono text-amber-400 border border-amber-400/30 rounded p-2">
-                      CryptoCompare fallback active: {news.fallbackReason}
+                      Live RSS fallback active: {news.fallbackReason}
                     </div>
                   )}
                   {news.data.map((item) => (
