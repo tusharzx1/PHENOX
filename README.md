@@ -1,76 +1,127 @@
-# PHENOX 🌌 Cyberpunk Fraud Detection Terminal
+PHENOX – Gold RWA Platform on Monad
+PHENOX tokenizes physical gold on the Monad blockchain, combining institutional‑grade security with a social marketplace. Admins authenticate using face recognition + OTP to mint PGOLD tokens (1 token = 1 gram), while every gold batch (weight, purity, location) is recorded immutably on‑chain. The public dashboard lets users connect wallets, trade gold, view real‑time analytics (price, market cap, holder leaderboard), and engage in a social feed where trades automatically generate posts. Built with Next.js, Node.js, PostgreSQL, and Solidity, PHENOX brings transparency, accessibility, and community to gold investment.
 
-PHENOX is a premium, 3rd-tier Security Terminal and RWA (Real World Asset) Gold management system built for the Monad ecosystem. It combines cutting-edge **Cyberpunk aesthetics** with a robust **Audit and Verification protocol**.
+Live demo: https://phenox-gold-rwa.web.app
 
-## 🚀 Vision
-A high-end, obsidian-cyan interface that bridges the gap between traditional asset management and the decentralized future.
+🌟 Features
+🔐 Biometric Admin Security – Face login + OTP via Clerk; only authorised admins can mint or burn tokens.
 
----
+📜 On‑Chain Gold Batches – Each batch (weight, purity, location, certification) stored in a smart contract; fully transparent.
 
-## 🏗️ Architecture
-- **Frontend:** Next.js, React Three Fiber (3D), Tailwind, Framer Motion, Clerk.
-- **Backend:** Node.js, Express, MongoDB, Clerk Auth.
-- **Blockchain:** Monad Testnet (Smart Contracts in Solidity).
+💬 Public Marketplace & Social Feed – Users connect wallet, buy/sell PGOLD, and post updates. On‑chain events auto‑generate feed entries.
 
-## 🛠️ Features
-- **Face ID Verification:** Simulated biometric scanning with live video feed.
-- **3D cosmic Background:** Immersive star-field environment.
-- **Fraud Monitoring:** Interactive Glassmorphism credit card UI with neon failure alerts.
-- **Audit Logs:** On-chain and off-chain audit trail for all admin actions.
-- **Market Tracker:** Real-time (mocked) gold value analysis (USD/INR).
+📊 Real‑Time Analytics Dashboard – Gold price (USD/INR), total supply, market cap, holder leaderboard, transaction feed, and public gold batch ledger.
 
-## 🔗 Monad Network Notes
-- Docs: https://docs.monad.xyz/introduction/monad-for-developers
-- Testnet RPC: `https://testnet-rpc.monad.xyz`
-- Testnet Chain ID: `10143`
-- Testnet Explorer: `https://testnet.monadvision.com`
-- Testnet reset date: **December 16, 2025** (contracts must be redeployed after reset)
+⚡ Built on Monad – High throughput, low fees, EVM‑compatible.
 
----
+🔌 Custom Indexer & APIs – Node.js backend listens to contract events, stores data in PostgreSQL, serves REST endpoints.
 
-## 🚦 Getting Started
+🛠 Tech Stack
+Layer	Technology
+Frontend	Next.js, Tailwind CSS, Clerk (auth), ethers.js
+Backend	Node.js, Express, PostgreSQL, node-cron, axios
+Blockchain	Solidity, Hardhat, Monad testnet
+APIs	GoldPrice.Today (gold price), DeFiLlama (stablecoins)
+Deployment	Firebase Hosting (frontend), Render (backend)
+🚀 Quick Start
+Prerequisites
+Node.js v18+
 
-### 1. Requirements
-- Node.js (v18+)
-- MongoDB Atlas (Cloud)
-- Clerk API Keys
+PostgreSQL
 
-### 2. Backend Initialization
-```bash
-cd backend
-npm install
-# Create .env from .env.example with your keys
-node server.js
-```
+MetaMask (or any EVM wallet)
 
-### 3. Frontend Initialization
-```bash
-cd frontend
-npm install --legacy-peer-deps
-# Create .env.local from .env.local.example with your keys
-npm run dev
-```
+Monad testnet RPC (e.g., from Ankr)
 
-### 4. Smart Contracts
-```bash
+1. Clone the repository
+bash
+git clone https://github.com/your-username/phenox.git
+cd phenox
+2. Smart Contracts
+bash
 cd contracts
 npm install
-npx hardhat compile
-# Deploy when ready
+# Create .env with PRIVATE_KEY and MONAD_RPC_URL
 npx hardhat run scripts/deploy.js --network monadTestnet
-```
+# Save the deployed contract addresses
+3. Backend
+bash
+cd backend
+npm install
+cp .env.example .env
+# Edit .env with DATABASE_URL, contract addresses, CLERK_SECRET_KEY
+npm run migrate   # runs PostgreSQL migrations
+npm run dev
+4. Frontend
+bash
+cd frontend
+npm install
+cp .env.local.example .env.local
+# Add NEXT_PUBLIC_API_URL (backend URL), Clerk keys, contract addresses
+npm run dev
+5. Open your browser
+Frontend: http://localhost:3000
 
-### 5. Security Checklist Before Deployment
-- Do not commit any `.env` files (only commit `*.env.example` templates).
-- Set `ADMIN_AUTH_TOKEN` and keep `ALLOW_INSECURE_DEMO_AUTH=false`.
-- Configure Clerk keys (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`) for authenticated admin flows.
-- Set Monad contract + RPC env values in `backend/.env`.
-- Remove dependency folders from git index if they were accidentally committed (for example `contracts/node_modules`).
+Backend: http://localhost:3001
 
----
+🔧 Environment Variables
+Backend .env
+text
+MONAD_RPC_URL=https://rpc.ankr.com/monad_testnet
+GOLD_TOKEN_ADDRESS=0x...
+BATCH_MANAGER_ADDRESS=0x...
+DATABASE_URL=postgresql://user:pass@localhost:5432/phenox
+PORT=3001
+CLERK_SECRET_KEY=sk_...
+Frontend .env.local
+text
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_MONAD_RPC_URL=https://rpc.ankr.com/monad_testnet
+NEXT_PUBLIC_GOLD_TOKEN_ADDRESS=0x...
+📁 Project Structure
+text
+phenox/
+├── contracts/            # Hardhat project
+│   ├── contracts/        # GoldToken.sol, GoldBatchManager.sol
+│   ├── scripts/          # deploy.js
+│   └── hardhat.config.js
+├── backend/              # Node.js server
+│   ├── routes/           # API endpoints
+│   ├── services/         # blockchain, price, indexer
+│   ├── db/               # PostgreSQL connection & migrations
+│   ├── middlewares/
+│   ├── utils/
+│   └── server.js
+├── frontend/             # Next.js app
+│   ├── pages/            # /admin/login, /admin/dashboard, /public/analytics
+│   ├── components/
+│   ├── hooks/
+│   ├── abi/              # Contract ABIs
+│   ├── styles/
+│   └── next.config.js
+└── README.md
+🧪 Testing
+Smart Contracts: cd contracts && npx hardhat test
 
-## ⚡ Live Project Summary
-The core PHENOX system is now fully implemented and ready for deployment. The **Cyberpunk Terminal** is optimized for high-performance visual fidelity, and the **Admin Dashboard** is ready for asset management.
+Backend: Use Postman or curl to test endpoints (see /backend/README.md)
 
-> [!IMPORTANT]
-> **Authentication:** Clerk is used for all secure routes. Ensure valid keys are present in both `.env` files to enable the Face Scan and Dashboard flows.
+Frontend: Manual testing of login, wallet connection, and transactions
+
+🚢 Deployment
+Frontend: cd frontend && firebase deploy (after setting up Firebase Hosting)
+
+Backend: Deploy on Render or Railway – connect GitHub repo, set environment variables
+
+Database: Use MongoDB Atlas or Supabase (PostgreSQL)
+
+🤝 Contributing
+Contributions are welcome! Please open an issue or submit a pull request. Follow the existing coding standards and include tests for new features.
+
+📄 License
+MIT © PHENOX Team
+
+🌐 Live Demo
+https://phenox-gold-rwa.web.app
+
+
