@@ -48,7 +48,7 @@ router.get('/stats', async (req, res) => {
   try {
     if (!ensureBlockchainReady(res)) return;
 
-    const { goldToken } = getBlockchain();
+    const { goldToken, network } = getBlockchain();
     const totalSupplyWei = await goldToken.totalSupply();
     const totalSupplyGrams = toGrams(totalSupplyWei);
     const price = getCurrentGoldPrice();
@@ -64,6 +64,10 @@ router.get('/stats', async (req, res) => {
         marketCapINR: totalSupplyGrams * Number(price.inr || 0),
         holders,
         goldPrice: price,
+        network: {
+          name: network?.name || null,
+          chainId: network?.chainId || null,
+        },
         lastUpdated: new Date().toISOString(),
       },
     });

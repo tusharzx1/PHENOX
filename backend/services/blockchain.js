@@ -7,11 +7,14 @@ const batchManagerAbi = require('../abi/GoldBatchManager.json');
 
 const RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 2000;
+const MONAD_DOCS_TESTNET_URL = 'https://docs.monad.xyz/developer-essentials/testnets';
+const MONAD_DOCS_RPC_PROVIDERS_URL = 'https://docs.monad.xyz/tooling-and-infra/rpc-providers';
 
 let provider = null;
 let goldToken = null;
 let batchManager = null;
 let initializedAt = null;
+let network = null;
 
 const validateEnv = () => {
   const missing = [];
@@ -23,6 +26,11 @@ const validateEnv = () => {
   }
 };
 
+const toOptionalPositiveInt = (value) => {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 const normalizeAddress = (value, name) => {
   try {
     return ethers.utils.getAddress(String(value));
@@ -30,6 +38,14 @@ const normalizeAddress = (value, name) => {
     throw new Error(`Invalid ${name}: ${value}`);
   }
 };
+
+const isWebsocketUrl = (url) => /^wss?:\/\//i.test(String(url || ''));
+
+const createProvider = (rpcUrl) => (
+  isWebsocketUrl(rpcUrl)
+    ? new ethers.providers.WebSocketProvider(rpcUrl)
+    : new ethers.providers.JsonRpcProvider(rpcUrl)
+);
 
 const verifyContract = async (rpcProvider, address, label) => {
   const code = await rpcProvider.getCode(address);
@@ -44,9 +60,21 @@ const initBlockchain = async () => {
   const rpcUrl = process.env.MONAD_RPC_URL;
   const goldAddress = normalizeAddress(process.env.GOLD_TOKEN_ADDRESS, 'GOLD_TOKEN_ADDRESS');
   const batchAddress = normalizeAddress(process.env.BATCH_MANAGER_ADDRESS, 'BATCH_MANAGER_ADDRESS');
+  const expectedChainId = toOptionalPositiveInt(process.env.MONAD_EXPECTED_CHAIN_ID);
+  const configuredNetworkName = String(process.env.MONAD_NETWORK || '').trim();
 
-  logger.info('Initializing blockchain services');
-  const rpcProvider = new ethers.providers.JsonRpcProvider(rpcUrl);
+  logger.info('Initializing blockchain services for Monad');
+  const rpcProvider = createProvider(rpcUrl);
+  const chainInfo = await rpcProvider.getNetwork();
+  const chainId = Number(chainInfo?.chainId || 0);
+  if (!chainId) {
+    throw new Error('Failed to determine chain ID from MONAD_RPC_URL');
+  }
+  if (expectedChainId && chainId !== expectedChainId) {
+    throw new Error(
+      `RPC chainId mismatch (expected ${expectedChainId}, got ${chainId}). Check ${MONAD_DOCS_TESTNET_URL}`
+    );
+  }
   const latestBlock = await rpcProvider.getBlockNumber();
 
   const token = new ethers.Contract(goldAddress, goldTokenAbi, rpcProvider);
@@ -61,8 +89,19 @@ const initBlockchain = async () => {
   goldToken = token;
   batchManager = manager;
   initializedAt = new Date().toISOString();
+  network = {
+    chainId,
+    name: configuredNetworkName || chainInfo?.name || 'monad',
+    rpcUrl,
+  };
 
-  logger.info('Blockchain initialized at block %d', latestBlock);
+  logger.info(
+    'Blockchain initialized at block %d (network=%s chainId=%d provider=%s)',
+    latestBlock,
+    network.name,
+    network.chainId,
+    isWebsocketUrl(rpcUrl) ? 'websocket' : 'http'
+  );
   return getBlockchain();
 };
 
@@ -84,10 +123,29 @@ const reconnect = async () => {
     }
   }
 
-  throw new Error(`Blockchain reconnect failed after ${RECONNECT_ATTEMPTS} attempts: ${lastError?.message || 'unknown error'}`);
+  throw new Error(
+    `Blockchain reconnect failed after ${RECONNECT_ATTEMPTS} attempts: ${lastError?.message || 'unknown error'}. See ${MONAD_DOCS_RPC_PROVIDERS_URL}`
+  );
 };
 
 const isBlockchainReady = () => Boolean(provider && goldToken && batchManager);
+
+const closeBlockchain = async () => {
+  if (!provider) return;
+  try {
+    if (provider?.removeAllListeners) provider.removeAllListeners();
+    if (provider?._websocket?.terminate) provider._websocket.terminate();
+    if (provider?._websocket?.close) provider._websocket.close();
+  } catch (error) {
+    logger.warn('Error while closing blockchain provider: %s', error.message);
+  } finally {
+    provider = null;
+    goldToken = null;
+    batchManager = null;
+    network = null;
+    initializedAt = null;
+  }
+};
 
 const getBlockchain = () => {
   if (!isBlockchainReady()) {
@@ -99,10 +157,12 @@ const getBlockchain = () => {
     goldToken,
     batchManager,
     initializedAt,
+    network,
   };
 };
 
 module.exports = {
+  closeBlockchain,
   getBlockchain,
   initBlockchain,
   isBlockchainReady,

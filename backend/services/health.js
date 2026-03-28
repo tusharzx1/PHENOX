@@ -19,6 +19,8 @@ const getHealthSnapshot = async () => {
         ok: true,
         blockNumber,
         initializedAt: chain.initializedAt,
+        chainId: chain.network?.chainId || null,
+        networkName: chain.network?.name || null,
         error: null,
       };
     } catch (error) {
@@ -26,6 +28,8 @@ const getHealthSnapshot = async () => {
         ok: false,
         blockNumber: null,
         initializedAt: null,
+        chainId: null,
+        networkName: null,
         error: error.message,
       };
     }
