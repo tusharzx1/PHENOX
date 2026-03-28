@@ -2,21 +2,12 @@ import { useEffect, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { Layers, BarChart2, Shield, Eye } from 'lucide-react';
-import { useClerk, useUser } from '@clerk/nextjs';
-import { useRouter } from 'next/router';
+import { useClerk, useUser } from '@/lib/auth';
 
 export default function PublicHome() {
-  const router = useRouter();
   const { isLoaded, isSignedIn, user } = useUser();
   const { signOut } = useClerk();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    if (!isLoaded) return;
-    if (!isSignedIn) {
-      router.replace('/public/login');
-    }
-  }, [isLoaded, isSignedIn, router]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -57,14 +48,10 @@ export default function PublicHome() {
 
   const handleLogout = async () => {
     await signOut();
-    router.push('/public/login');
   };
 
   if (!isLoaded) {
     return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center font-mono">Loading authentication...</div>;
-  }
-  if (!isSignedIn) {
-    return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center font-mono">Redirecting to login...</div>;
   }
 
   const features = [
@@ -88,13 +75,15 @@ export default function PublicHome() {
         <div className="font-mono font-bold text-xl text-[#FFD700] tracking-widest">&gt;_ PHENOX</div>
         <div className="flex items-center gap-6">
           <span className="text-xs text-gray-500 font-mono hidden md:block">
-            {user?.primaryEmailAddress?.emailAddress || 'Authenticated User'}
+            {user?.primaryEmailAddress?.emailAddress || 'Guest Session'}
           </span>
           <Link href="/public/analytics" className="text-sm text-gray-400 hover:text-[#FFD700] transition-colors font-mono">Analytics</Link>
           <Link href="/admin/login" className="text-sm px-4 py-2 border border-[#FFD700]/40 text-[#FFD700] rounded hover:bg-[#FFD700]/10 transition-all font-mono">Admin Login</Link>
-          <button onClick={handleLogout} className="text-sm px-4 py-2 border border-red-400/40 text-red-300 rounded hover:bg-red-400/10 transition-all font-mono">
-            Logout
-          </button>
+          {isSignedIn && (
+            <button onClick={handleLogout} className="text-sm px-4 py-2 border border-red-400/40 text-red-300 rounded hover:bg-red-400/10 transition-all font-mono">
+              Logout
+            </button>
+          )}
         </div>
       </nav>
 

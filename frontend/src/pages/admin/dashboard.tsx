@@ -1,4 +1,4 @@
-import { useAuth, useUser } from '@clerk/nextjs';
+import { useAuth, useUser } from '@/lib/auth';
 import { useEffect, useState } from 'react';
 
 type AdminBatchRecord = {

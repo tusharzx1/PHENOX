@@ -1,4 +1,4 @@
-import { SignIn, useUser } from '@clerk/nextjs';
+import { SignIn, useUser } from '@/lib/auth';
 import { useRouter } from 'next/router';
 import { useEffect } from 'react';
 

@@ -354,6 +354,219 @@ const mockTreasuryData = (reason) => {
   };
 };
 
+const mockStablecoinsData = (symbols, reason) => {
+  const defaults = {
+    USDT: {
+      name: 'Tether USDt',
+      marketCapUsd: 110_250_000_000,
+      totalSupply: 110_250_000_000,
+      pegVariancePct: 0.04,
+      chainDistribution: [
+        { chain: 'Ethereum', supplyUsd: 51_000_000_000, sharePct: 46.26 },
+        { chain: 'Tron', supplyUsd: 46_000_000_000, sharePct: 41.72 },
+        { chain: 'Solana', supplyUsd: 7_500_000_000, sharePct: 6.8 },
+      ],
+    },
+    USDC: {
+      name: 'USD Coin',
+      marketCapUsd: 34_800_000_000,
+      totalSupply: 34_800_000_000,
+      pegVariancePct: 0.02,
+      chainDistribution: [
+        { chain: 'Ethereum', supplyUsd: 24_000_000_000, sharePct: 68.97 },
+        { chain: 'Base', supplyUsd: 4_300_000_000, sharePct: 12.36 },
+        { chain: 'Solana', supplyUsd: 3_900_000_000, sharePct: 11.21 },
+      ],
+    },
+    DAI: {
+      name: 'Dai',
+      marketCapUsd: 5_300_000_000,
+      totalSupply: 5_300_000_000,
+      pegVariancePct: 0.08,
+      chainDistribution: [
+        { chain: 'Ethereum', supplyUsd: 4_100_000_000, sharePct: 77.36 },
+        { chain: 'Arbitrum', supplyUsd: 520_000_000, sharePct: 9.81 },
+        { chain: 'Polygon', supplyUsd: 310_000_000, sharePct: 5.85 },
+      ],
+    },
+    USDS: {
+      name: 'USDS',
+      marketCapUsd: 920_000_000,
+      totalSupply: 920_000_000,
+      pegVariancePct: 0.11,
+      chainDistribution: [
+        { chain: 'Ethereum', supplyUsd: 670_000_000, sharePct: 72.83 },
+        { chain: 'Base', supplyUsd: 110_000_000, sharePct: 11.96 },
+        { chain: 'Arbitrum', supplyUsd: 85_000_000, sharePct: 9.24 },
+      ],
+    },
+  };
+
+  const selectedSymbols = (symbols && symbols.length ? symbols : Object.keys(defaults))
+    .filter((symbol) => defaults[symbol]);
+
+  const data = selectedSymbols.map((symbol, index) => ({
+    id: `stablecoin-fallback-${symbol.toLowerCase()}-${index}`,
+    symbol,
+    pegType: 'peggedUSD',
+    ...defaults[symbol],
+  }));
+
+  return {
+    success: true,
+    provider: 'DeFiLlama Stablecoins API (fallback simulator)',
+    isFallback: true,
+    fallbackReason: reason,
+    timestamp: new Date().toISOString(),
+    summary: {
+      trackedAssets: data.length,
+      totalMarketCapUsd: data.reduce((sum, row) => sum + row.marketCapUsd, 0),
+      averagePegVariancePct: data.length
+        ? data.reduce((sum, row) => sum + row.pegVariancePct, 0) / data.length
+        : 0,
+    },
+    data,
+  };
+};
+
+const mockMarketOverviewData = (limit, reason) => {
+  const data = [
+    {
+      id: 'ondo-finance',
+      symbol: 'ONDO',
+      name: 'Ondo',
+      currentPriceUsd: 0.92,
+      marketCapUsd: 1_280_000_000,
+      fullyDilutedValuationUsd: 9_200_000_000,
+      volume24hUsd: 185_000_000,
+      priceChange24hPct: 1.84,
+      circulatingSupply: 1_391_000_000,
+      lastUpdated: new Date().toISOString(),
+    },
+    {
+      id: 'maker',
+      symbol: 'MKR',
+      name: 'Maker',
+      currentPriceUsd: 2840.15,
+      marketCapUsd: 2_420_000_000,
+      fullyDilutedValuationUsd: 2_780_000_000,
+      volume24hUsd: 96_000_000,
+      priceChange24hPct: -0.73,
+      circulatingSupply: 852_000,
+      lastUpdated: new Date().toISOString(),
+    },
+    {
+      id: 'pax-gold',
+      symbol: 'PAXG',
+      name: 'PAX Gold',
+      currentPriceUsd: 2324.67,
+      marketCapUsd: 610_000_000,
+      fullyDilutedValuationUsd: 610_000_000,
+      volume24hUsd: 24_000_000,
+      priceChange24hPct: 0.42,
+      circulatingSupply: 262_000,
+      lastUpdated: new Date().toISOString(),
+    },
+    {
+      id: 'tether-gold',
+      symbol: 'XAUT',
+      name: 'Tether Gold',
+      currentPriceUsd: 2319.11,
+      marketCapUsd: 570_000_000,
+      fullyDilutedValuationUsd: 570_000_000,
+      volume24hUsd: 11_000_000,
+      priceChange24hPct: 0.31,
+      circulatingSupply: 246_000,
+      lastUpdated: new Date().toISOString(),
+    },
+  ].slice(0, limit);
+
+  return {
+    success: true,
+    provider: 'CoinGecko API (fallback simulator)',
+    isFallback: true,
+    fallbackReason: reason,
+    endpoint: '/coins/markets?category=real-world-assets-rwa',
+    timestamp: new Date().toISOString(),
+    summary: {
+      rwaAssetsTracked: data.length,
+      rwaCombinedMarketCapUsd: data.reduce((sum, row) => sum + row.marketCapUsd, 0),
+      rwaCombined24hVolumeUsd: data.reduce((sum, row) => sum + row.volume24hUsd, 0),
+      globalCryptoMarketCapUsd: 2_450_000_000_000,
+      btcDominancePct: 53.8,
+      ethDominancePct: 17.2,
+    },
+    data,
+  };
+};
+
+const mockNetworksData = (limit, reason) => {
+  const data = [
+    {
+      name: 'Monad',
+      chainId: 10143,
+      tokenSymbol: 'MON',
+      tvlUsd: null,
+      activeAddresses24h: null,
+      activeAddressesSource: 'Fallback snapshot for local demo mode',
+    },
+    {
+      name: 'Ethereum',
+      chainId: 1,
+      tokenSymbol: 'ETH',
+      tvlUsd: 58_400_000_000,
+      activeAddresses24h: null,
+      activeAddressesSource: 'Fallback snapshot for local demo mode',
+    },
+    {
+      name: 'Solana',
+      chainId: null,
+      tokenSymbol: 'SOL',
+      tvlUsd: 7_900_000_000,
+      activeAddresses24h: null,
+      activeAddressesSource: 'Fallback snapshot for local demo mode',
+    },
+    {
+      name: 'Arbitrum',
+      chainId: 42161,
+      tokenSymbol: 'ETH',
+      tvlUsd: 3_100_000_000,
+      activeAddresses24h: null,
+      activeAddressesSource: 'Fallback snapshot for local demo mode',
+    },
+    {
+      name: 'Base',
+      chainId: 8453,
+      tokenSymbol: 'ETH',
+      tvlUsd: 2_450_000_000,
+      activeAddresses24h: null,
+      activeAddressesSource: 'Fallback snapshot for local demo mode',
+    },
+    {
+      name: 'Polygon',
+      chainId: 137,
+      tokenSymbol: 'POL',
+      tvlUsd: 980_000_000,
+      activeAddresses24h: null,
+      activeAddressesSource: 'Fallback snapshot for local demo mode',
+    },
+  ].slice(0, limit);
+
+  return {
+    success: true,
+    provider: 'DeFiLlama Chains API (fallback simulator)',
+    isFallback: true,
+    fallbackReason: reason,
+    endpoint: '/v2/chains',
+    timestamp: new Date().toISOString(),
+    summary: {
+      chainsTracked: data.length,
+      combinedTvlUsd: data.reduce((sum, chain) => sum + (toSafeNumber(chain.tvlUsd) || 0), 0),
+    },
+    data,
+  };
+};
+
 const mockNewsItems = (limit, reason) => {
   const now = Date.now();
   const templates = [
@@ -472,12 +685,7 @@ app.get('/api/dashboard/stablecoins', async (req, res) => {
 
     res.json(payload);
   } catch (error) {
-    res.status(502).json({
-      success: false,
-      provider: 'DeFiLlama Stablecoins API',
-      message: 'Failed to load stablecoins data',
-      error: error.message,
-    });
+    res.json(mockStablecoinsData(symbols, error.message));
   }
 });
 
@@ -536,12 +744,7 @@ app.get('/api/dashboard/market-overview', async (req, res) => {
 
     res.json(payload);
   } catch (error) {
-    res.status(502).json({
-      success: false,
-      provider: 'CoinGecko API (Free Tier)',
-      message: 'Failed to load market overview',
-      error: error.message,
-    });
+    res.json(mockMarketOverviewData(limit, error.message));
   }
 });
 
@@ -675,12 +878,7 @@ app.get('/api/dashboard/networks', async (req, res) => {
 
     res.json(payload);
   } catch (error) {
-    res.status(502).json({
-      success: false,
-      provider: 'DeFiLlama Chains API',
-      message: 'Failed to load networks data',
-      error: error.message,
-    });
+    res.json(mockNetworksData(limit, error.message));
   }
 });
 

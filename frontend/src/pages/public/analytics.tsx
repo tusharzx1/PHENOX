@@ -1,8 +1,7 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type ElementType } from 'react';
-import { useClerk, useUser } from '@clerk/nextjs';
-import { useRouter } from 'next/router';
+import { useClerk, useUser } from '@/lib/auth';
 import {
   Activity,
   BarChart3,
@@ -149,7 +148,6 @@ const compactMoney = (value?: number | null) =>
   }).format(Number(value || 0));
 
 export default function PublicAnalytics() {
-  const router = useRouter();
   const { isLoaded: authLoaded, isSignedIn, user } = useUser();
   const { signOut } = useClerk();
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
@@ -168,54 +166,86 @@ export default function PublicAnalytics() {
 
   const activeTabMeta = useMemo(() => TABS.find((tab) => tab.key === activeTab), [activeTab]);
 
-  useEffect(() => {
-    if (!authLoaded) return;
-    if (!isSignedIn) {
-      router.replace('/public/login');
-    }
-  }, [authLoaded, isSignedIn, router]);
-
   const fetchDashboard = async (silent = false) => {
     if (!silent) setIsLoading(true);
     try {
-      const endpoints = [
-        '/api/dashboard/stablecoins',
-        '/api/dashboard/market-overview',
-        '/api/dashboard/news',
-        '/api/dashboard/networks',
-        '/api/dashboard/us-treasuries',
-        '/api/dashboard/commodities',
-        '/api/blockchain/public/records',
-      ];
+      const fetchJson = async (path: string) => {
+        const res = await fetch(`${backendUrl}${path}`);
+        const body = await res.json();
+        if (!res.ok) {
+          throw new Error(body?.message || `Request failed: ${path}`);
+        }
+        return body;
+      };
 
-      const responses = await Promise.all(
-        endpoints.map((path) =>
-          fetch(`${backendUrl}${path}`).then(async (res) => {
-            const body = await res.json();
-            if (!res.ok) {
-              throw new Error(body?.message || `Request failed: ${path}`);
-            }
-            return body;
-          })
-        )
-      );
+      const [
+        stablecoinsRes,
+        marketRes,
+        newsRes,
+        networksRes,
+        treasuriesRes,
+        commoditiesRes,
+        ledgerRes,
+      ] = await Promise.allSettled([
+        fetchJson('/api/dashboard/stablecoins'),
+        fetchJson('/api/dashboard/market-overview'),
+        fetchJson('/api/dashboard/news'),
+        fetchJson('/api/dashboard/networks'),
+        fetchJson('/api/dashboard/us-treasuries'),
+        fetchJson('/api/dashboard/commodities'),
+        fetchJson('/api/blockchain/public/records'),
+      ]);
 
-      setStablecoins({ summary: responses[0].summary, data: responses[0].data || [] });
-      setMarket({ summary: responses[1].summary, data: responses[1].data || [] });
-      setNews({
-        isFallback: responses[2].isFallback,
-        fallbackReason: responses[2].fallbackReason,
-        data: responses[2].data || [],
-      });
-      setNetworks({ summary: responses[3].summary, data: responses[3].data || [] });
-      setTreasuries({
-        isFallback: responses[4].isFallback,
-        fallbackReason: responses[4].fallbackReason,
-        summary: responses[4].summary,
-        data: responses[4].data || [],
-      });
-      setCommodities(responses[5]?.data || null);
-      setPublicLedger(responses[6]?.data || []);
+      if (stablecoinsRes.status === 'fulfilled') {
+        setStablecoins({ summary: stablecoinsRes.value.summary, data: stablecoinsRes.value.data || [] });
+      } else {
+        setStablecoins({ data: [] });
+      }
+
+      if (marketRes.status === 'fulfilled') {
+        setMarket({ summary: marketRes.value.summary, data: marketRes.value.data || [] });
+      } else {
+        setMarket({ data: [] });
+      }
+
+      if (newsRes.status === 'fulfilled') {
+        setNews({
+          isFallback: newsRes.value.isFallback,
+          fallbackReason: newsRes.value.fallbackReason,
+          data: newsRes.value.data || [],
+        });
+      } else {
+        setNews({ data: [] });
+      }
+
+      if (networksRes.status === 'fulfilled') {
+        setNetworks({ summary: networksRes.value.summary, data: networksRes.value.data || [] });
+      } else {
+        setNetworks({ data: [] });
+      }
+
+      if (treasuriesRes.status === 'fulfilled') {
+        setTreasuries({
+          isFallback: treasuriesRes.value.isFallback,
+          fallbackReason: treasuriesRes.value.fallbackReason,
+          summary: treasuriesRes.value.summary,
+          data: treasuriesRes.value.data || [],
+        });
+      } else {
+        setTreasuries({ data: [] });
+      }
+
+      if (commoditiesRes.status === 'fulfilled') {
+        setCommodities(commoditiesRes.value?.data || null);
+      } else {
+        setCommodities(null);
+      }
+
+      if (ledgerRes.status === 'fulfilled') {
+        setPublicLedger(ledgerRes.value?.data || []);
+      } else {
+        setPublicLedger([]);
+      }
 
       setLastUpdated(new Date().toLocaleTimeString());
       setError(null);
@@ -227,22 +257,18 @@ export default function PublicAnalytics() {
   };
 
   useEffect(() => {
-    if (!authLoaded || !isSignedIn) return;
+    if (!authLoaded) return;
     fetchDashboard(false);
     const interval = setInterval(() => fetchDashboard(true), 30000);
     return () => clearInterval(interval);
-  }, [backendUrl, authLoaded, isSignedIn]);
+  }, [backendUrl, authLoaded]);
 
   const handleLogout = async () => {
     await signOut();
-    router.push('/public/login');
   };
 
   if (!authLoaded) {
     return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center font-mono">Loading authentication...</div>;
-  }
-  if (!isSignedIn) {
-    return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center font-mono">Redirecting to login...</div>;
   }
 
   return (
@@ -262,7 +288,7 @@ export default function PublicAnalytics() {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-gray-500 font-mono hidden lg:block">
-            {user?.primaryEmailAddress?.emailAddress || 'Authenticated User'}
+            {user?.primaryEmailAddress?.emailAddress || 'Guest Session'}
           </span>
           <button
             onClick={() => fetchDashboard(false)}
@@ -271,12 +297,14 @@ export default function PublicAnalytics() {
             <RefreshCw size={12} />
             Refresh
           </button>
-          <button
-            onClick={handleLogout}
-            className="text-xs border border-red-400/40 text-red-300 px-3 py-1.5 rounded hover:bg-red-400/10 transition-all font-mono"
-          >
-            Logout
-          </button>
+          {isSignedIn && (
+            <button
+              onClick={handleLogout}
+              className="text-xs border border-red-400/40 text-red-300 px-3 py-1.5 rounded hover:bg-red-400/10 transition-all font-mono"
+            >
+              Logout
+            </button>
+          )}
           <span className="text-xs text-gray-500 font-mono hidden md:flex items-center gap-2">
             Last updated: {lastUpdated}
           </span>
