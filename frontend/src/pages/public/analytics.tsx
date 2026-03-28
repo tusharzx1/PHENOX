@@ -1,305 +1,535 @@
 import Head from 'next/head';
 import Link from 'next/link';
+import { useEffect, useMemo, useState, type ElementType } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, AreaChart, Area
-} from 'recharts';
-import { TrendingUp, TrendingDown, Database, Users, Activity, Shield, ExternalLink, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+  Activity,
+  BarChart3,
+  Coins,
+  Landmark,
+  Network,
+  Newspaper,
+  RefreshCw,
+  TrendingUp,
+} from 'lucide-react';
 
-// ─── STATIC DATA ──────────────────────────────────────────
-const GOLD_PRICE_DATA = [
-  { day: 'Mar 1',  usd: 2042, inr: 169800 },
-  { day: 'Mar 5',  usd: 2078, inr: 172900 },
-  { day: 'Mar 9',  usd: 2095, inr: 174300 },
-  { day: 'Mar 13', usd: 2061, inr: 171400 },
-  { day: 'Mar 17', usd: 2110, inr: 175600 },
-  { day: 'Mar 21', usd: 2134, inr: 177500 },
-  { day: 'Mar 25', usd: 2101, inr: 174800 },
-  { day: 'Mar 28', usd: 2158, inr: 179400 },
-];
+type TabKey = 'stablecoins' | 'market' | 'news' | 'networks' | 'treasuries' | 'commodities';
 
-const GOLD_BATCHES = [
-  { id: 'BATCH-001', weight: 1000, purity: '24K', location: 'Dubai Vault A', cert: 'QmX9k...Abc', status: 'Public',  date: '2024-10-15', valueUSD: 67540 },
-  { id: 'BATCH-002', weight: 500,  purity: '22K', location: 'Singapore Vault B', cert: 'QmY7n...Def', status: 'Public',  date: '2024-10-22', valueUSD: 32150 },
-  { id: 'BATCH-003', weight: 2500, purity: '24K', location: 'Zurich Vault C', cert: 'QmZ3p...Ghi', status: 'Public',  date: '2024-11-01', valueUSD: 168900 },
-  { id: 'BATCH-004', weight: 750,  purity: '18K', location: 'London Vault D', cert: 'QmA2m...Jkl', status: 'Private', date: '2024-11-08', valueUSD: 37800 },
-  { id: 'BATCH-005', weight: 300,  purity: '24K', location: 'Dubai Vault A', cert: 'QmB5q...Mno', status: 'Public',  date: '2024-11-15', valueUSD: 20260 },
-];
-
-const TOP_HOLDERS = [
-  { rank: 1, address: '0x236739...C4F8', balance: 50000, pct: 25.0 },
-  { rank: 2, address: '0xAb82Fc...9E21', balance: 35000, pct: 17.5 },
-  { rank: 3, address: '0xC4d107...3B9A', balance: 28000, pct: 14.0 },
-  { rank: 4, address: '0xE7f3A9...7D5C', balance: 21500, pct: 10.75 },
-  { rank: 5, address: '0x91B2E6...1F2D', balance: 15000, pct: 7.5 },
-  { rank: 6, address: '0x5F8D3C...A4B8', balance: 12000, pct: 6.0 },
-  { rank: 7, address: '0x3A9F71...C3E7', balance: 9500,  pct: 4.75 },
-  { rank: 8, address: '0x8C2B54...D6F9', balance: 7000,  pct: 3.5 },
-];
-
-const TRANSACTIONS = [
-  { hash: '0xf4a1...9b2c', type: 'MINT',     amount: 50000, time: '2 min ago',  color: '#39FF14' },
-  { hash: '0x9c2d...1e4f', type: 'TRANSFER', amount: 1200,  time: '18 min ago', color: '#00E5FF' },
-  { hash: '0x3b7e...8f1a', type: 'MINT',     amount: 28000, time: '45 min ago', color: '#39FF14' },
-  { hash: '0xd5f9...2c3e', type: 'BURN',     amount: 500,   time: '1h ago',     color: '#FF4D4D' },
-  { hash: '0x1a2b...7d8e', type: 'TRANSFER', amount: 3500,  time: '2h ago',     color: '#00E5FF' },
-  { hash: '0xe8c4...0f5b', type: 'MINT',     amount: 15000, time: '3h ago',     color: '#39FF14' },
-  { hash: '0x7f3a...4e9d', type: 'BURN',     amount: 800,   time: '5h ago',     color: '#FF4D4D' },
-];
-
-// ─── SUB-COMPONENTS ────────────────────────────────────────
-
-function StatCard({ icon: Icon, label, value, sub, up }: {
-  icon: React.ElementType; label: string; value: string; sub?: string; up?: boolean;
-}) {
-  return (
-    <div className="bg-white/[0.03] border border-[#FFD700]/10 rounded-xl p-5 hover:border-[#FFD700]/25 transition-all">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-mono text-gray-500 uppercase tracking-widest">{label}</span>
-        <Icon size={16} className="text-[#FFD700] opacity-60" />
-      </div>
-      <div className="text-2xl font-bold text-white">{value}</div>
-      {sub && (
-        <div className={`text-xs mt-1 flex items-center gap-1 ${up ? 'text-[#39FF14]' : 'text-[#FF4D4D]'}`}>
-          {up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-          {sub}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload?.length) {
-    return (
-      <div className="bg-black border border-[#FFD700]/30 rounded-lg p-3 text-xs font-mono">
-        <p className="text-[#FFD700] mb-1">{label}</p>
-        <p className="text-white">USD: ${payload[0]?.value?.toLocaleString()}</p>
-      </div>
-    );
-  }
-  return null;
+type StablecoinItem = {
+  name: string;
+  symbol: string;
+  marketCapUsd: number;
+  totalSupply: number;
+  pegVariancePct: number;
+  chainDistribution: Array<{ chain: string; supplyUsd: number; sharePct: number }>;
 };
 
-// ─── MAIN PAGE ─────────────────────────────────────────────
+type MarketCoin = {
+  id: string;
+  symbol: string;
+  name: string;
+  currentPriceUsd: number;
+  marketCapUsd: number;
+  volume24hUsd: number;
+  priceChange24hPct: number;
+};
+
+type NewsItem = {
+  id: string | number;
+  title: string;
+  url: string;
+  source: string;
+  publishedAt: string;
+  categories: string[];
+};
+
+type NetworkItem = {
+  name: string;
+  chainId: number | null;
+  tokenSymbol: string | null;
+  tvlUsd: number | null;
+  activeAddresses24h: number | null;
+  activeAddressesSource?: string;
+};
+
+type TreasuryItem = {
+  symbol: string;
+  name: string;
+  contract: string;
+  totalSupply: number;
+  priceUsd: number;
+  tvlUsd: number;
+};
+
+type CommoditiesData = {
+  usd: number;
+  inr: number;
+  vaultStatus?: string;
+  reserveLocation?: string;
+};
+
+type PublicLedgerRecord = {
+  batchId: string;
+  weight: number;
+  purity: number;
+  location: string;
+  certification?: string;
+  timestamp?: string;
+  onChain?: {
+    status?: string;
+    txHash?: string;
+  };
+};
+
+const TABS: Array<{
+  key: TabKey;
+  label: string;
+  provider: string;
+  icon: ElementType;
+  category: string;
+}> = [
+  {
+    key: 'stablecoins',
+    label: 'Stablecoins',
+    provider: 'DeFiLlama Stablecoins API',
+    icon: Coins,
+    category: 'Market Cap, Supply, Peg Variance',
+  },
+  {
+    key: 'market',
+    label: 'Market Overview',
+    provider: 'CoinGecko API (Free Tier)',
+    icon: BarChart3,
+    category: 'Global Crypto & RWA Token Metrics',
+  },
+  {
+    key: 'news',
+    label: 'News',
+    provider: 'CryptoCompare News API',
+    icon: Newspaper,
+    category: 'Latest Updates on Tokenization',
+  },
+  {
+    key: 'networks',
+    label: 'Networks',
+    provider: 'DeFiLlama Chains API',
+    icon: Network,
+    category: 'Blockchain TVL and Active Addresses',
+  },
+  {
+    key: 'treasuries',
+    label: 'U.S. Treasuries',
+    provider: 'RPC Reads / Fallback Mock',
+    icon: Landmark,
+    category: 'Tokenized Treasury TVL (BUIDL, OUSG)',
+  },
+  {
+    key: 'commodities',
+    label: 'Commodities',
+    provider: 'GoldPrice.Today',
+    icon: Activity,
+    category: 'Live Gold Prices & Vault Status',
+  },
+];
+
+const money = (value?: number | null, digits = 0) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: digits,
+  }).format(Number(value || 0));
+
+const compactMoney = (value?: number | null) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+
 export default function PublicAnalytics() {
-  const [lastUpdated] = useState(() => new Date().toLocaleTimeString());
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+  const [activeTab, setActiveTab] = useState<TabKey>('stablecoins');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>('—');
+
+  const [stablecoins, setStablecoins] = useState<{ summary?: any; data: StablecoinItem[] }>({ data: [] });
+  const [market, setMarket] = useState<{ summary?: any; data: MarketCoin[] }>({ data: [] });
+  const [news, setNews] = useState<{ isFallback?: boolean; fallbackReason?: string; data: NewsItem[] }>({ data: [] });
+  const [networks, setNetworks] = useState<{ summary?: any; data: NetworkItem[] }>({ data: [] });
+  const [treasuries, setTreasuries] = useState<{ isFallback?: boolean; fallbackReason?: string; summary?: any; data: TreasuryItem[] }>({ data: [] });
+  const [commodities, setCommodities] = useState<CommoditiesData | null>(null);
+  const [publicLedger, setPublicLedger] = useState<PublicLedgerRecord[]>([]);
+
+  const activeTabMeta = useMemo(() => TABS.find((tab) => tab.key === activeTab), [activeTab]);
+
+  const fetchDashboard = async (silent = false) => {
+    if (!silent) setIsLoading(true);
+    try {
+      const endpoints = [
+        '/api/dashboard/stablecoins',
+        '/api/dashboard/market-overview',
+        '/api/dashboard/news',
+        '/api/dashboard/networks',
+        '/api/dashboard/us-treasuries',
+        '/api/dashboard/commodities',
+        '/api/blockchain/public/records',
+      ];
+
+      const responses = await Promise.all(
+        endpoints.map((path) =>
+          fetch(`${backendUrl}${path}`).then(async (res) => {
+            const body = await res.json();
+            if (!res.ok) {
+              throw new Error(body?.message || `Request failed: ${path}`);
+            }
+            return body;
+          })
+        )
+      );
+
+      setStablecoins({ summary: responses[0].summary, data: responses[0].data || [] });
+      setMarket({ summary: responses[1].summary, data: responses[1].data || [] });
+      setNews({
+        isFallback: responses[2].isFallback,
+        fallbackReason: responses[2].fallbackReason,
+        data: responses[2].data || [],
+      });
+      setNetworks({ summary: responses[3].summary, data: responses[3].data || [] });
+      setTreasuries({
+        isFallback: responses[4].isFallback,
+        fallbackReason: responses[4].fallbackReason,
+        summary: responses[4].summary,
+        data: responses[4].data || [],
+      });
+      setCommodities(responses[5]?.data || null);
+      setPublicLedger(responses[6]?.data || []);
+
+      setLastUpdated(new Date().toLocaleTimeString());
+      setError(null);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load dashboard data.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboard(false);
+    const interval = setInterval(() => fetchDashboard(true), 30000);
+    return () => clearInterval(interval);
+  }, [backendUrl]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-white">
       <Head>
-        <title>PHENOX | Gold Analytics Dashboard</title>
-        <meta name="description" content="Real-time gold RWA analytics on Monad Testnet" />
+        <title>PHENOX | Unified RWA Dashboard</title>
+        <meta name="description" content="Stablecoins, RWA markets, tokenization news, chain TVL, treasuries and commodities." />
       </Head>
 
-      {/* Header */}
-      <header className="border-b border-[#FFD700]/10 px-8 py-4 flex items-center justify-between sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-sm">
-        <div className="flex items-center gap-6">
-          <Link href="/public" className="font-mono font-bold text-[#FFD700] tracking-widest text-lg">&gt;_ PHENOX</Link>
+      <header className="border-b border-[#FFD700]/10 px-6 py-4 flex items-center justify-between sticky top-0 z-20 bg-[#050505]/95 backdrop-blur">
+        <div className="flex items-center gap-5">
+          <Link href="/public" className="font-mono font-bold text-[#FFD700] tracking-widest text-lg">
+            &gt;_ PHENOX
+          </Link>
           <span className="text-gray-600 hidden md:block">|</span>
-          <span className="text-gray-400 text-sm hidden md:block font-mono">Gold Analytics Dashboard</span>
+          <span className="text-gray-400 text-sm hidden md:block font-mono">Unified Dashboard Data Terminal</span>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-xs text-gray-600 font-mono hidden md:flex items-center gap-2">
-            <RefreshCw size={11} /> Last updated: {lastUpdated}
+          <button
+            onClick={() => fetchDashboard(false)}
+            className="text-xs border border-[#FFD700]/30 text-[#FFD700] px-3 py-1.5 rounded hover:bg-[#FFD700]/10 transition-all font-mono flex items-center gap-2"
+          >
+            <RefreshCw size={12} />
+            Refresh
+          </button>
+          <span className="text-xs text-gray-500 font-mono hidden md:flex items-center gap-2">
+            Last updated: {lastUpdated}
           </span>
-          <div className="flex items-center gap-2 text-xs font-mono">
-            <span className="w-2 h-2 rounded-full bg-[#39FF14] animate-pulse" />
-            <span className="text-gray-400">Monad Testnet</span>
-          </div>
-          <Link href="/admin/login" className="text-xs border border-[#FFD700]/30 text-[#FFD700] px-3 py-1.5 rounded hover:bg-[#FFD700]/10 transition-all font-mono">
-            Admin →
-          </Link>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+      <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <MetricCard label="Stablecoin Market Cap (Tracked)" value={compactMoney(stablecoins.summary?.totalMarketCapUsd)} />
+          <MetricCard label="RWA Market Cap (Tracked)" value={compactMoney(market.summary?.rwaCombinedMarketCapUsd)} />
+          <MetricCard label="Tokenized Treasury TVL" value={compactMoney(treasuries.summary?.totalTvlUsd)} />
+        </section>
 
-        {/* ── SECTION 1: GLOBAL STATS ── */}
-        <section>
-          <h2 className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-4">Global Market Overview</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <StatCard icon={TrendingUp}  label="Total Tokenized"  value="$326.4M"  sub="+2.7% (24h)" up />
-            <StatCard icon={Activity}    label="Gold Price"        value="$2,158"   sub="+1.35% (24h)" up />
-            <StatCard icon={Database}    label="Total Batches"     value="5"        />
-            <StatCard icon={Users}       label="Active Holders"    value="127"      />
-            <StatCard icon={Shield}      label="Total Supply"      value="200K"     sub="PGOLD tokens" up />
-            <StatCard icon={Shield}      label="Vault Reserve"     value="5,050g"   sub="Physical Gold" up />
+        <section className="bg-white/[0.02] border border-[#FFD700]/10 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold">Public Ledger Records (Admin Sync)</h2>
+            <span className="text-xs font-mono text-gray-500">
+              Auto-refreshed from <span className="text-[#FFD700]">/api/blockchain/public/records</span>
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-white/10">
+                  {['Batch ID', 'Weight', 'Purity', 'Location', 'Chain Status', 'Updated'].map((head) => (
+                    <th key={head} className="text-left px-3 py-3 text-xs text-gray-500 uppercase font-mono">
+                      {head}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {publicLedger.map((item) => (
+                  <tr key={item.batchId} className="border-b border-white/[0.04]">
+                    <td className="px-3 py-3 font-semibold text-[#FFD700]">{item.batchId}</td>
+                    <td className="px-3 py-3">{Number(item.weight).toLocaleString()} g</td>
+                    <td className="px-3 py-3">{item.purity}K</td>
+                    <td className="px-3 py-3">{item.location}</td>
+                    <td className="px-3 py-3">{item.onChain?.status || 'PENDING'}</td>
+                    <td className="px-3 py-3 text-xs text-gray-500">
+                      {item.timestamp ? new Date(item.timestamp).toLocaleString() : '—'}
+                    </td>
+                  </tr>
+                ))}
+                {!publicLedger.length && (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-6 text-center text-sm text-gray-500">
+                      No public records yet. Add a public batch from admin panel to see it here.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
 
-        {/* ── SECTION 2: GOLD PRICE CHART ── */}
+        <section className="bg-white/[0.02] border border-[#FFD700]/10 rounded-xl p-4">
+          <div className="flex flex-wrap gap-2">
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const active = tab.key === activeTab;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`px-3 py-2 rounded-lg border text-xs font-mono transition-all flex items-center gap-2 ${
+                    active
+                      ? 'border-[#FFD700] bg-[#FFD700]/10 text-[#FFD700]'
+                      : 'border-white/10 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Icon size={13} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         <section className="bg-white/[0.02] border border-[#FFD700]/10 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-5">
             <div>
-              <h2 className="text-lg font-bold text-white">Gold Price (USD/oz)</h2>
-              <p className="text-gray-500 text-xs font-mono mt-1">Historical 28-day trend</p>
+              <h2 className="text-lg font-bold text-white">{activeTabMeta?.label}</h2>
+              <p className="text-xs text-gray-500 font-mono mt-1">{activeTabMeta?.category}</p>
             </div>
             <div className="text-right">
-              <div className="text-3xl font-black text-[#FFD700]">$2,158</div>
-              <div className="text-[#39FF14] text-xs font-mono">▲ +$28.50 (1.35%)</div>
+              <div className="text-[10px] uppercase tracking-widest text-gray-600 font-mono">Provider</div>
+              <div className="text-sm text-[#FFD700] font-semibold">{activeTabMeta?.provider}</div>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={GOLD_PRICE_DATA} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
-              <defs>
-                <linearGradient id="goldGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#FFD700" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#FFD700" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,215,0,0.05)" />
-              <XAxis dataKey="day" tick={{ fill: '#6b7280', fontSize: 11, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#6b7280', fontSize: 11, fontFamily: 'monospace' }} axisLine={false} tickLine={false} domain={['dataMin - 50', 'dataMax + 50']} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="usd" stroke="#FFD700" strokeWidth={2} fill="url(#goldGrad)" dot={false} activeDot={{ r: 4, fill: '#FFD700' }} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </section>
 
-        {/* ── SECTION 3: GOLD BATCHES TABLE ── */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xs font-mono text-gray-500 uppercase tracking-widest">Gold Batch Registry</h2>
-            <span className="text-xs text-gray-600 font-mono">On-chain • Monad Testnet</span>
-          </div>
-          <div className="bg-white/[0.02] border border-[#FFD700]/10 rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#FFD700]/10">
-                    {['Batch ID', 'Weight (g)', 'Purity', 'Location', 'Certification', 'Status', 'Value (USD)', 'Date'].map(h => (
-                      <th key={h} className="text-left px-4 py-3 text-xs font-mono text-gray-500 uppercase tracking-wider">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {GOLD_BATCHES.map((b, i) => (
-                    <tr key={b.id} className={`border-b border-white/[0.03] hover:bg-[#FFD700]/[0.03] transition-colors ${i % 2 === 0 ? 'bg-white/[0.01]' : ''}`}>
-                      <td className="px-4 py-3 font-mono text-[#FFD700] text-xs">{b.id}</td>
-                      <td className="px-4 py-3 text-white font-semibold">{b.weight.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-gray-300">{b.purity}</td>
-                      <td className="px-4 py-3 text-gray-400 text-xs">{b.location}</td>
-                      <td className="px-4 py-3">
-                        <span className="flex items-center gap-1 text-[#00E5FF] text-xs font-mono hover:underline cursor-pointer">
-                          {b.cert} <ExternalLink size={10} />
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-mono ${b.status === 'Public' ? 'bg-[#39FF14]/10 text-[#39FF14]' : 'bg-gray-500/10 text-gray-500'}`}>
-                          {b.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-white">${b.valueUSD.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs font-mono">{b.date}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
+          {isLoading && <div className="text-sm text-gray-400 font-mono">Loading live data...</div>}
+          {!isLoading && error && <div className="text-sm text-red-400 font-mono">{error}</div>}
 
-        {/* ── SECTION 4: SPLIT — HOLDERS + TRANSACTIONS ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {!isLoading && !error && (
+            <>
+              {activeTab === 'stablecoins' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/10">
+                        {['Asset', 'Market Cap', 'Supply', 'Peg Variance', 'Top Chains'].map((head) => (
+                          <th key={head} className="text-left px-3 py-3 text-xs text-gray-500 uppercase font-mono">
+                            {head}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stablecoins.data.map((item) => (
+                        <tr key={item.symbol} className="border-b border-white/[0.04]">
+                          <td className="px-3 py-3">
+                            <div className="font-semibold">{item.name}</div>
+                            <div className="text-xs text-gray-500">{item.symbol}</div>
+                          </td>
+                          <td className="px-3 py-3">{money(item.marketCapUsd)}</td>
+                          <td className="px-3 py-3">{item.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                          <td className="px-3 py-3 text-[#39FF14]">{item.pegVariancePct.toFixed(3)}%</td>
+                          <td className="px-3 py-3 text-xs text-gray-400">
+                            {(item.chainDistribution || [])
+                              .slice(0, 2)
+                              .map((chain) => `${chain.chain} (${chain.sharePct.toFixed(1)}%)`)
+                              .join(', ') || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
-          {/* HOLDERS LEADERBOARD */}
-          <section>
-            <h2 className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-4">Top PGOLD Holders</h2>
-            <div className="bg-white/[0.02] border border-[#FFD700]/10 rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#FFD700]/10">
-                    {['#', 'Address', 'Balance', '% Supply'].map(h => (
-                      <th key={h} className="text-left px-4 py-3 text-xs font-mono text-gray-500 uppercase">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {TOP_HOLDERS.map((h) => (
-                    <tr key={h.rank} className="border-b border-white/[0.03] hover:bg-[#FFD700]/[0.03] transition-colors">
-                      <td className="px-4 py-2.5 text-gray-500 font-mono text-xs">{h.rank}</td>
-                      <td className="px-4 py-2.5 font-mono text-[#00E5FF] text-xs">{h.address}</td>
-                      <td className="px-4 py-2.5 text-white text-xs">{h.balance.toLocaleString()} PGOLD</td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1 bg-white/10 rounded">
-                            <div className="h-1 bg-[#FFD700] rounded" style={{ width: `${h.pct * 4}%` }} />
-                          </div>
-                          <span className="text-gray-400 text-xs font-mono">{h.pct}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* TRANSACTION FEED */}
-          <section>
-            <h2 className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-4">Latest Transactions</h2>
-            <div className="bg-white/[0.02] border border-[#FFD700]/10 rounded-xl divide-y divide-white/[0.03]">
-              {TRANSACTIONS.map((tx) => (
-                <div key={tx.hash} className="flex items-center justify-between px-4 py-3 hover:bg-[#FFD700]/[0.03] transition-colors">
-                  <div className="flex items-center gap-3">
-                    <span className="px-2 py-0.5 rounded text-xs font-mono font-bold" style={{ color: tx.color, backgroundColor: `${tx.color}15` }}>
-                      {tx.type}
-                    </span>
-                    <span className="font-mono text-xs text-[#00E5FF] hover:underline cursor-pointer flex items-center gap-1">
-                      {tx.hash} <ExternalLink size={10} />
-                    </span>
+              {activeTab === 'market' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <MetricCard label="Global Crypto Market Cap" value={compactMoney(market.summary?.globalCryptoMarketCapUsd)} />
+                    <MetricCard label="RWA 24h Volume (Tracked)" value={compactMoney(market.summary?.rwaCombined24hVolumeUsd)} />
+                    <MetricCard label="BTC Dominance" value={`${Number(market.summary?.btcDominancePct || 0).toFixed(2)}%`} />
                   </div>
-                  <div className="text-right">
-                    <div className="text-white text-sm font-semibold">{tx.amount.toLocaleString()} PGOLD</div>
-                    <div className="text-gray-600 text-xs font-mono">{tx.time}</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-white/10">
+                          {['Token', 'Price', 'Market Cap', '24h Volume', '24h Change'].map((head) => (
+                            <th key={head} className="text-left px-3 py-3 text-xs text-gray-500 uppercase font-mono">
+                              {head}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {market.data.map((coin) => (
+                          <tr key={coin.id} className="border-b border-white/[0.04]">
+                            <td className="px-3 py-3">
+                              <div className="font-semibold">{coin.name}</div>
+                              <div className="text-xs text-gray-500">{coin.symbol}</div>
+                            </td>
+                            <td className="px-3 py-3">{money(coin.currentPriceUsd, 4)}</td>
+                            <td className="px-3 py-3">{compactMoney(coin.marketCapUsd)}</td>
+                            <td className="px-3 py-3">{compactMoney(coin.volume24hUsd)}</td>
+                            <td className={`px-3 py-3 ${coin.priceChange24hPct >= 0 ? 'text-[#39FF14]' : 'text-[#FF4D4D]'}`}>
+                              {coin.priceChange24hPct.toFixed(2)}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              ))}
-            </div>
-          </section>
-        </div>
+              )}
 
-        {/* ── SECTION 5: VAULT RESERVE ── */}
-        <section className="bg-gradient-to-r from-[#FFD700]/5 to-transparent border border-[#FFD700]/20 rounded-xl p-6">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-bold text-white mb-1">🏦 Vault Reserve &amp; Proof of Reserve</h2>
-              <p className="text-gray-400 text-sm">Physical gold backing verified on-chain via Monad Testnet smart contracts.</p>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="text-center">
-                <div className="text-3xl font-black text-[#FFD700]">5,050g</div>
-                <div className="text-gray-500 text-xs font-mono">Total Physical Gold</div>
-              </div>
-              <div className="text-center">
-                <div className="text-3xl font-black text-white">$326.4M</div>
-                <div className="text-gray-500 text-xs font-mono">Current Value</div>
-              </div>
-              <div className="text-center">
-                <span className="px-3 py-1.5 bg-[#39FF14]/10 text-[#39FF14] border border-[#39FF14]/30 rounded-full text-xs font-mono font-bold">
-                  ✓ VERIFIED
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 flex gap-3">
-            <button className="text-xs font-mono text-[#FFD700] underline hover:no-underline flex items-center gap-1">
-              View Audit Report <ExternalLink size={10} />
-            </button>
-            <button className="text-xs font-mono text-gray-500 underline hover:no-underline flex items-center gap-1">
-              Monad Explorer <ExternalLink size={10} />
-            </button>
-          </div>
+              {activeTab === 'news' && (
+                <div className="space-y-3">
+                  {news.isFallback && (
+                    <div className="text-xs font-mono text-amber-400 border border-amber-400/30 rounded p-2">
+                      CryptoCompare fallback active: {news.fallbackReason}
+                    </div>
+                  )}
+                  {news.data.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block border border-white/10 rounded-lg p-4 hover:border-[#FFD700]/30 transition-all"
+                    >
+                      <div className="text-white font-semibold mb-2">{item.title}</div>
+                      <div className="text-xs text-gray-500 font-mono flex flex-wrap gap-3">
+                        <span>{item.source}</span>
+                        <span>{new Date(item.publishedAt).toLocaleString()}</span>
+                        <span>{(item.categories || []).join(', ') || 'General'}</span>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'networks' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/10">
+                        {['Network', 'Chain ID', 'TVL', 'Active Addresses (24h)', 'Note'].map((head) => (
+                          <th key={head} className="text-left px-3 py-3 text-xs text-gray-500 uppercase font-mono">
+                            {head}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {networks.data.map((item) => (
+                        <tr key={item.name} className="border-b border-white/[0.04]">
+                          <td className="px-3 py-3 font-semibold">{item.name}</td>
+                          <td className="px-3 py-3">{item.chainId ?? '—'}</td>
+                          <td className="px-3 py-3">{item.tvlUsd == null ? '—' : compactMoney(item.tvlUsd)}</td>
+                          <td className="px-3 py-3">{item.activeAddresses24h ?? 'N/A'}</td>
+                          <td className="px-3 py-3 text-xs text-gray-500">{item.activeAddressesSource || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeTab === 'treasuries' && (
+                <div className="space-y-3">
+                  {treasuries.isFallback && (
+                    <div className="text-xs font-mono text-amber-400 border border-amber-400/30 rounded p-2">
+                      RPC fallback simulator active: {treasuries.fallbackReason}
+                    </div>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-white/10">
+                          {['Asset', 'Contract', 'Supply', 'Price', 'TVL'].map((head) => (
+                            <th key={head} className="text-left px-3 py-3 text-xs text-gray-500 uppercase font-mono">
+                              {head}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {treasuries.data.map((item) => (
+                          <tr key={item.symbol} className="border-b border-white/[0.04]">
+                            <td className="px-3 py-3">
+                              <div className="font-semibold">{item.name}</div>
+                              <div className="text-xs text-gray-500">{item.symbol}</div>
+                            </td>
+                            <td className="px-3 py-3 text-xs font-mono">{item.contract}</td>
+                            <td className="px-3 py-3">{item.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                            <td className="px-3 py-3">{money(item.priceUsd, 4)}</td>
+                            <td className="px-3 py-3">{compactMoney(item.tvlUsd)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'commodities' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <MetricCard label="Gold Price (USD/g)" value={money(commodities?.usd, 2)} />
+                  <MetricCard label="Gold Price (INR/g)" value={`₹${Number(commodities?.inr || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`} />
+                  <MetricCard label="Vault Status" value={commodities?.vaultStatus || 'Verified'} />
+                </div>
+              )}
+            </>
+          )}
         </section>
-
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-[#FFD700]/10 px-8 py-6 text-center text-gray-600 text-xs font-mono">
-        PHENOX &copy; 2025 — Gold-Backed RWA on Monad Testnet | Data refreshes every 30s
+        PHENOX Dashboard Matrix wired to live provider endpoints with 30s refresh
       </footer>
+    </div>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-white/[0.03] border border-[#FFD700]/10 rounded-xl p-4">
+      <div className="text-[10px] uppercase tracking-widest text-gray-500 font-mono mb-2">{label}</div>
+      <div className="text-xl font-bold text-white flex items-center gap-2">
+        <TrendingUp size={15} className="text-[#FFD700]" />
+        {value}
+      </div>
     </div>
   );
 }

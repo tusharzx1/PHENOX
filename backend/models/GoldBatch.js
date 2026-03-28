@@ -8,6 +8,22 @@ const goldBatchSchema = new mongoose.Schema({
   certification: { type: String },
   isPublic: { type: Boolean, default: true },
   adminEmail: { type: String, required: true },
+  onChain: {
+    status: {
+      type: String,
+      enum: ['PENDING', 'CONFIRMED', 'FAILED', 'SKIPPED'],
+      default: 'PENDING'
+    },
+    chain: { type: String, default: 'ethereum' },
+    chainId: { type: Number },
+    txHash: { type: String },
+    blockNumber: { type: Number },
+    payloadHash: { type: String },
+    explorerUrl: { type: String },
+    metadataURI: { type: String },
+    error: { type: String },
+    anchoredAt: { type: Date }
+  },
   timestamp: { type: Date, default: Date.now }
 });
 
