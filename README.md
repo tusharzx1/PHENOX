@@ -19,6 +19,13 @@ A high-end, obsidian-cyan interface that bridges the gap between traditional ass
 - **Audit Logs:** On-chain and off-chain audit trail for all admin actions.
 - **Market Tracker:** Real-time (mocked) gold value analysis (USD/INR).
 
+## 🔗 Monad Network Notes
+- Docs: https://docs.monad.xyz/introduction/monad-for-developers
+- Testnet RPC: `https://testnet-rpc.monad.xyz`
+- Testnet Chain ID: `10143`
+- Testnet Explorer: `https://testnet.monadvision.com`
+- Testnet reset date: **December 16, 2025** (contracts must be redeployed after reset)
+
 ---
 
 ## 🚦 Getting Started
@@ -52,6 +59,13 @@ npx hardhat compile
 # Deploy when ready
 npx hardhat run scripts/deploy.js --network monadTestnet
 ```
+
+### 5. Security Checklist Before Deployment
+- Do not commit any `.env` files (only commit `*.env.example` templates).
+- Set `ADMIN_AUTH_TOKEN` and keep `ALLOW_INSECURE_DEMO_AUTH=false`.
+- Configure Clerk keys (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`) for authenticated admin flows.
+- Set Monad contract + RPC env values in `backend/.env`.
+- Remove dependency folders from git index if they were accidentally committed (for example `contracts/node_modules`).
 
 ---
 

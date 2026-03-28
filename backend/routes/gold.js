@@ -1,36 +1,12 @@
-const crypto = require('crypto');
 const express = require('express');
 const db = require('../db');
 const logger = require('../utils/logger');
 const { clamp, parsePositiveInt, toGrams } = require('../utils/helpers');
 const { getCurrentGoldPrice } = require('../services/price');
 const { getBlockchain, isBlockchainReady } = require('../services/blockchain');
+const { requireAdminAuth } = require('../middlewares/adminAuth');
 
 const router = express.Router();
-const adminAuthToken = String(process.env.ADMIN_AUTH_TOKEN || '').trim();
-
-const extractBearerToken = (authorizationHeader = '') => {
-  if (typeof authorizationHeader !== 'string') return '';
-  if (!authorizationHeader.toLowerCase().startsWith('bearer ')) return '';
-  return authorizationHeader.slice(7).trim();
-};
-
-const secureTokenMatch = (expected, provided) => {
-  if (!expected || !provided) return false;
-  const expectedBuffer = Buffer.from(expected);
-  const providedBuffer = Buffer.from(provided);
-  if (expectedBuffer.length !== providedBuffer.length) return false;
-  return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
-};
-
-const requireAdminAuth = (req, res, next) => {
-  if (!adminAuthToken) return next();
-  const provided = extractBearerToken(req.headers.authorization);
-  if (!secureTokenMatch(adminAuthToken, provided)) {
-    return res.status(401).json({ success: false, message: 'Unauthorized' });
-  }
-  return next();
-};
 
 const sendError = (res, status, message) => {
   res.status(status).json({ success: false, message });

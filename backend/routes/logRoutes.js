@@ -1,13 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const AdminLog = require('../models/AdminLog');
+const { requireAdminAuth } = require('../middlewares/adminAuth');
 
 // Mock data fallback
 const mockLogs = [
   { action: 'SYSTEM_BOOT', details: 'PHENOX Backend initialized', adminEmail: 'system@phenox.com', ipAddress: '127.0.0.1', timestamp: new Date() }
 ];
 
-router.get('/', async (req, res) => {
+router.get('/', requireAdminAuth, async (req, res) => {
   try {
     // Try real DB first
     const logs = await AdminLog.find({}).sort({ timestamp: -1 }).limit(100);
