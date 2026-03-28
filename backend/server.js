@@ -3,13 +3,12 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const crypto = require('crypto');
-const { Clerk } = require('@clerk/backend');
 const blockchainRoutes = require('./routes/blockchainRoutes');
 const goldRoutes = require('./routes/gold');
 const requestLogger = require('./middlewares/requestLogger');
 const errorHandler = require('./middlewares/errorHandler');
 const { notFoundHandler } = require('./middlewares/errorHandler');
+const { requireAdminAuth, validateAdminAuthConfig } = require('./middlewares/adminAuth');
 const logger = require('./utils/logger');
 const db = require('./db');
 const { initBlockchain } = require('./services/blockchain');
@@ -60,23 +59,6 @@ const TREASURY_TOKENS = [
 ];
 
 const dashboardCache = new Map();
-const clerkSecretKey = process.env.CLERK_SECRET_KEY;
-const clerk = clerkSecretKey ? Clerk({ secretKey: clerkSecretKey }) : null;
-const staticAdminToken = String(process.env.ADMIN_AUTH_TOKEN || '').trim();
-
-const extractBearerToken = (authorizationHeader = '') => {
-  if (typeof authorizationHeader !== 'string') return '';
-  if (!authorizationHeader.toLowerCase().startsWith('bearer ')) return '';
-  return authorizationHeader.slice(7).trim();
-};
-
-const tokenMatches = (expected, received) => {
-  if (!expected || !received) return false;
-  const expectedBuffer = Buffer.from(expected);
-  const receivedBuffer = Buffer.from(received);
-  if (expectedBuffer.length !== receivedBuffer.length) return false;
-  return crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
-};
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -409,35 +391,8 @@ const mockNewsItems = (limit, reason) => {
   return templates.slice(0, limit);
 };
 
-// Middleware to verify Clerk session
-const requireAuth = async (req, res, next) => {
-  if (staticAdminToken) {
-    const sessionToken = extractBearerToken(req.headers.authorization);
-    if (!tokenMatches(staticAdminToken, sessionToken)) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    req.userId = 'admin-token';
-    return next();
-  }
-
-  if (!clerk) {
-    req.userId = 'demo-admin';
-    return next();
-  }
-
-  const sessionToken = extractBearerToken(req.headers.authorization);
-  if (!sessionToken) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const session = await clerk.sessions.verifySession({ sessionId: sessionToken });
-    req.userId = session.userId;
-    next();
-  } catch {
-    res.status(401).json({ error: 'Invalid session' });
-  }
-};
-
 // POST /api/log - log admin action with IP
-app.post('/api/log', requireAuth, (req, res) => {
+app.post('/api/log', requireAdminAuth, (req, res) => {
   const { action, details } = req.body;
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   console.log(`[${new Date().toISOString()}] Admin ${req.userId} | ${action} | ${details} | IP: ${ip}`);
@@ -826,6 +781,7 @@ const PORT = process.env.PORT || 3001;
 let server = null;
 
 const bootstrap = async () => {
+  validateAdminAuthConfig();
   startPriceScheduler();
 
   try {

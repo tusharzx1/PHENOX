@@ -5,8 +5,9 @@ module.exports = {
   solidity: "0.8.20",
   networks: {
     monadTestnet: {
-      url: "https://testnet-rpc.monad.xyz/", // replace with actual RPC
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [], // store in .env
+      url: process.env.MONAD_RPC_URL || "https://testnet-rpc.monad.xyz",
+      chainId: Number(process.env.MONAD_EXPECTED_CHAIN_ID || 10143),
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
     },
   },
 };

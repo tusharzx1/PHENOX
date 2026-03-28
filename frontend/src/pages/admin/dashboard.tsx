@@ -1,4 +1,4 @@
-import { useUser } from '@clerk/nextjs';
+import { useAuth, useUser } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 
 type AdminBatchRecord = {
@@ -18,6 +18,7 @@ type AdminBatchRecord = {
 
 export default function AdminDashboard() {
   const { isLoaded, isSignedIn, user } = useUser();
+  const { getToken } = useAuth();
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
   const [totalSupply, setTotalSupply] = useState('0');
   const [batches, setBatches] = useState<AdminBatchRecord[]>([]);
@@ -65,7 +66,10 @@ export default function AdminDashboard() {
 
   const fetchBatches = async () => {
     try {
-      const adminRes = await fetch(`${backendUrl}/api/blockchain/admin/records`);
+      const token = isDemo ? null : await getToken();
+      const adminRes = await fetch(`${backendUrl}/api/blockchain/admin/records`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (adminRes.ok) {
         const adminData = await adminRes.json();
         setBatches(adminData.data || []);
@@ -100,11 +104,12 @@ export default function AdminDashboard() {
 
     const batchId = `BATCH-${Date.now()}`;
     try {
+      const token = isDemo ? null : await getToken();
       const res = await fetch(`${backendUrl}/api/blockchain/admin/push`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-email': user?.emailAddresses?.[0]?.emailAddress || 'demo@phenox.com',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           batchId,

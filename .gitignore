@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+**/node_modules/
 .pnp
 .pnp.js
 .yarn/install-state.gz
@@ -14,8 +15,11 @@ dist/
 
 # Environment files (keep .env.example files)
 .env
+**/.env
 .env.local
+**/.env.local
 .env.*.local
+**/.env.*.local
 *.env.local
 
 # Python

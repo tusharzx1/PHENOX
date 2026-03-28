@@ -3,10 +3,15 @@ const crypto = require('crypto');
 const { ethers } = require('ethers');
 const GoldBatch = require('../models/GoldBatch');
 const AdminLog = require('../models/AdminLog');
+const { requireAdminAuth } = require('../middlewares/adminAuth');
 
 const router = express.Router();
 const inMemoryBatches = [];
 const isDbConnected = () => GoldBatch?.db?.readyState === 1;
+const MONAD_DOCS_GAS_PRICING_URL = 'https://docs.monad.xyz/developer-essentials/gas-pricing';
+const MONAD_DOCS_TESTNETS_URL = 'https://docs.monad.xyz/developer-essentials/testnets';
+const MONAD_TESTNET_CHAIN_ID = 10143;
+const MONAD_DEFAULT_EXPLORER_TX_BASE = 'https://testnet.monadvision.com/tx/';
 
 const DEFAULT_ANCHOR_ABI = [
   'function registerBatch(string batchId, bytes32 payloadHash, string metadataURI) external returns (bool)'
@@ -33,31 +38,76 @@ const hashPayload = (payload) => {
   return `0x${crypto.createHash('sha256').update(canonical).digest('hex')}`;
 };
 
-const getL1Config = () => ({
-  rpcUrl: process.env.L1_RPC_URL || '',
-  privateKey: process.env.L1_PRIVATE_KEY || '',
-  contractAddress: process.env.L1_REGISTRY_CONTRACT || '',
-  methodName: process.env.L1_REGISTRY_METHOD || 'registerBatch',
-  confirmations: Number(process.env.L1_CONFIRMATIONS || 1),
-  strictMode: parseBool(process.env.L1_STRICT_MODE, false),
-  chainName: process.env.L1_CHAIN_NAME || 'ethereum'
-});
+const getFirstDefinedEnv = (...keys) => {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim();
+    }
+  }
+  return '';
+};
 
-const getExplorerUrl = (chainName, txHash) => {
+const toPositiveIntOrNull = (value) => {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const toPositiveNumberOrNull = (value) => {
+  const parsed = Number(String(value || ''));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getMonadAnchorConfig = () => {
+  const chainName = getFirstDefinedEnv(
+    'MONAD_ANCHOR_CHAIN_NAME',
+    'MONAD_NETWORK',
+    'L1_CHAIN_NAME'
+  ) || 'monad-testnet';
+
+  return {
+    rpcUrl: getFirstDefinedEnv('MONAD_ANCHOR_RPC_URL', 'L1_RPC_URL'),
+    privateKey: getFirstDefinedEnv('MONAD_ANCHOR_PRIVATE_KEY', 'L1_PRIVATE_KEY'),
+    contractAddress: getFirstDefinedEnv('MONAD_ANCHOR_REGISTRY_CONTRACT', 'L1_REGISTRY_CONTRACT'),
+    methodName: getFirstDefinedEnv('MONAD_ANCHOR_REGISTRY_METHOD', 'L1_REGISTRY_METHOD') || 'registerBatch',
+    confirmations: toPositiveIntOrNull(getFirstDefinedEnv('MONAD_ANCHOR_CONFIRMATIONS', 'L1_CONFIRMATIONS')) || 1,
+    strictMode: parseBool(getFirstDefinedEnv('MONAD_ANCHOR_STRICT_MODE', 'L1_STRICT_MODE'), false),
+    chainName,
+    expectedChainId: toPositiveIntOrNull(
+      getFirstDefinedEnv('MONAD_ANCHOR_CHAIN_ID', 'MONAD_EXPECTED_CHAIN_ID')
+    ) || MONAD_TESTNET_CHAIN_ID,
+    explorerTxBaseUrl: getFirstDefinedEnv(
+      'MONAD_ANCHOR_EXPLORER_TX_BASE',
+      'MONAD_TESTNET_EXPLORER_TX_BASE'
+    ) || MONAD_DEFAULT_EXPLORER_TX_BASE,
+    gasLimit: toPositiveIntOrNull(getFirstDefinedEnv('MONAD_ANCHOR_GAS_LIMIT', 'L1_GAS_LIMIT')),
+    maxFeePerGasGwei: toPositiveNumberOrNull(
+      getFirstDefinedEnv('MONAD_ANCHOR_MAX_FEE_PER_GAS_GWEI', 'L1_MAX_FEE_PER_GAS_GWEI')
+    ),
+    maxPriorityFeePerGasGwei: toPositiveNumberOrNull(
+      getFirstDefinedEnv('MONAD_ANCHOR_MAX_PRIORITY_FEE_PER_GAS_GWEI', 'L1_MAX_PRIORITY_FEE_PER_GAS_GWEI')
+    )
+  };
+};
+
+const getExplorerUrl = (chainName, txHash, explorerTxBaseUrl = '') => {
   if (!txHash) return '';
   if (chainName.toLowerCase().includes('sepolia')) return `https://sepolia.etherscan.io/tx/${txHash}`;
   if (chainName.toLowerCase().includes('ethereum')) return `https://etherscan.io/tx/${txHash}`;
-  if (chainName.toLowerCase().includes('monad')) return '';
+  if (chainName.toLowerCase().includes('monad')) {
+    const base = String(explorerTxBaseUrl || MONAD_DEFAULT_EXPLORER_TX_BASE).replace(/\/+$/, '');
+    return `${base}/${txHash}`;
+  }
   return '';
 };
 
 const anchorBatchToL1 = async ({ batchId, metadataURI, payloadHash }) => {
-  const config = getL1Config();
+  const config = getMonadAnchorConfig();
   const missingConfig = [];
 
-  if (!config.rpcUrl) missingConfig.push('L1_RPC_URL');
-  if (!config.privateKey) missingConfig.push('L1_PRIVATE_KEY');
-  if (!config.contractAddress) missingConfig.push('L1_REGISTRY_CONTRACT');
+  if (!config.rpcUrl) missingConfig.push('MONAD_ANCHOR_RPC_URL');
+  if (!config.privateKey) missingConfig.push('MONAD_ANCHOR_PRIVATE_KEY');
+  if (!config.contractAddress) missingConfig.push('MONAD_ANCHOR_REGISTRY_CONTRACT');
 
   if (missingConfig.length > 0) {
     const error = `Missing blockchain config: ${missingConfig.join(', ')}`;
@@ -72,6 +122,11 @@ const anchorBatchToL1 = async ({ batchId, metadataURI, payloadHash }) => {
   try {
     const provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
     const network = await provider.getNetwork();
+    if (config.expectedChainId && Number(network.chainId) !== Number(config.expectedChainId)) {
+      throw new Error(
+        `RPC chainId mismatch (expected ${config.expectedChainId}, got ${Number(network.chainId)}). Check ${MONAD_DOCS_TESTNETS_URL}`
+      );
+    }
     const signer = new ethers.Wallet(config.privateKey, provider);
     const contract = new ethers.Contract(config.contractAddress, DEFAULT_ANCHOR_ABI, signer);
 
@@ -79,7 +134,24 @@ const anchorBatchToL1 = async ({ batchId, metadataURI, payloadHash }) => {
       throw new Error(`Contract method "${config.methodName}" not found`);
     }
 
-    const tx = await contract[config.methodName](batchId, payloadHash, metadataURI || '');
+    const txOptions = {};
+    if (config.gasLimit) txOptions.gasLimit = config.gasLimit;
+    if (config.maxFeePerGasGwei) {
+      txOptions.maxFeePerGas = ethers.utils.parseUnits(String(config.maxFeePerGasGwei), 'gwei');
+    }
+    if (config.maxPriorityFeePerGasGwei) {
+      txOptions.maxPriorityFeePerGas = ethers.utils.parseUnits(
+        String(config.maxPriorityFeePerGasGwei),
+        'gwei'
+      );
+    }
+
+    const tx = await contract[config.methodName](
+      batchId,
+      payloadHash,
+      metadataURI || '',
+      txOptions
+    );
     const receipt = await tx.wait(config.confirmations);
 
     return {
@@ -88,8 +160,12 @@ const anchorBatchToL1 = async ({ batchId, metadataURI, payloadHash }) => {
       chainId: Number(network.chainId),
       txHash: tx.hash,
       blockNumber: receipt.blockNumber,
+      gasLimit: tx.gasLimit ? tx.gasLimit.toString() : null,
+      gasUsed: receipt.gasUsed ? receipt.gasUsed.toString() : null,
+      effectiveGasPriceWei: receipt.effectiveGasPrice ? receipt.effectiveGasPrice.toString() : null,
+      gasChargedByLimit: true,
       payloadHash,
-      explorerUrl: getExplorerUrl(config.chainName, tx.hash),
+      explorerUrl: getExplorerUrl(config.chainName, tx.hash, config.explorerTxBaseUrl),
       anchoredAt: new Date().toISOString(),
       error: receipt.status === 1 ? '' : 'Transaction failed on-chain'
     };
@@ -127,17 +203,23 @@ const toAdminRecord = (batch) => ({
 });
 
 router.get('/health', (req, res) => {
-  const cfg = getL1Config();
+  const cfg = getMonadAnchorConfig();
   res.json({
     success: true,
     chain: cfg.chainName,
     blockchainConfigured: Boolean(cfg.rpcUrl && cfg.privateKey && cfg.contractAddress),
-    strictMode: cfg.strictMode
+    strictMode: cfg.strictMode,
+    expectedChainId: cfg.expectedChainId,
+    explorerTxBaseUrl: cfg.explorerTxBaseUrl,
+    docs: {
+      gasPricing: MONAD_DOCS_GAS_PRICING_URL,
+      testnets: MONAD_DOCS_TESTNETS_URL
+    }
   });
 });
 
-// Admin pushes batch data -> backend stores -> anchors hash on L1.
-router.post('/admin/push', async (req, res) => {
+// Admin pushes batch data -> backend stores -> anchors hash on Monad.
+router.post('/admin/push', requireAdminAuth, async (req, res) => {
   try {
     const {
       batchId,
@@ -156,7 +238,7 @@ router.post('/admin/push', async (req, res) => {
       });
     }
 
-    const adminEmail = req.auth?.claims?.email || req.headers['x-admin-email'] || 'demo@phenox.com';
+    const adminEmail = req.auth?.claims?.email || req.userId || 'unknown-admin';
     const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
     const batchCore = {
@@ -211,7 +293,7 @@ router.post('/admin/push', async (req, res) => {
       success: true,
       data: savedBatch,
       note: onChain.status === 'CONFIRMED'
-        ? 'Batch anchored on L1 and now available to public panel.'
+        ? 'Batch anchored on Monad and now available to public panel.'
         : 'Batch saved but blockchain anchor is pending/failed/skipped.'
     });
   } catch (err) {
@@ -223,7 +305,7 @@ router.post('/admin/push', async (req, res) => {
 });
 
 // Admin dashboard can see all records, including private entries.
-router.get('/admin/records', async (req, res) => {
+router.get('/admin/records', requireAdminAuth, async (req, res) => {
   try {
     try {
       if (!isDbConnected()) throw new Error('MongoDB not connected');
