@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+motor
+python-dotenv
+pydantic
+clerk-backend-api
+cors

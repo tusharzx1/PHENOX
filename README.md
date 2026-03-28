@@ -1,40 +1,62 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# PHENOX 🌌 Cyberpunk Fraud Detection Terminal
 
-## Getting Started
+PHENOX is a premium, 3rd-tier Security Terminal and RWA (Real World Asset) Gold management system built for the Monad ecosystem. It combines cutting-edge **Cyberpunk aesthetics** with a robust **Audit and Verification protocol**.
 
-First, run the development server:
+## 🚀 Vision
+A high-end, obsidian-cyan interface that bridges the gap between traditional asset management and the decentralized future.
 
+---
+
+## 🏗️ Architecture
+- **Frontend:** Next.js, React Three Fiber (3D), Tailwind, Framer Motion, Clerk.
+- **Backend:** Node.js, Express, MongoDB, Clerk Auth.
+- **Blockchain:** Monad Testnet (Smart Contracts in Solidity).
+
+## 🛠️ Features
+- **Face ID Verification:** Simulated biometric scanning with live video feed.
+- **3D cosmic Background:** Immersive star-field environment.
+- **Fraud Monitoring:** Interactive Glassmorphism credit card UI with neon failure alerts.
+- **Audit Logs:** On-chain and off-chain audit trail for all admin actions.
+- **Market Tracker:** Real-time (mocked) gold value analysis (USD/INR).
+
+---
+
+## 🚦 Getting Started
+
+### 1. Requirements
+- Node.js (v18+)
+- MongoDB Atlas (Cloud)
+- Clerk API Keys
+
+### 2. Backend Initialization
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd backend
+npm install
+# Create .env from .env.example with your keys
+node server.js
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Frontend Initialization
+```bash
+cd frontend
+npm install --legacy-peer-deps
+# Create .env.local from .env.local.example with your keys
+npm run dev
+```
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+### 4. Smart Contracts
+```bash
+cd contracts
+npm install
+npx hardhat compile
+# Deploy when ready
+npx hardhat run scripts/deploy.js --network monadTestnet
+```
 
-[API routes](https://nextjs.org/docs/api-routes/introduction) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+---
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/api-routes/introduction) instead of React pages.
+## ⚡ Live Project Summary
+The core PHENOX system is now fully implemented and ready for deployment. The **Cyberpunk Terminal** is optimized for high-performance visual fidelity, and the **Admin Dashboard** is ready for asset management.
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+> [!IMPORTANT]
+> **Authentication:** Clerk is used for all secure routes. Ensure valid keys are present in both `.env` files to enable the Face Scan and Dashboard flows.
