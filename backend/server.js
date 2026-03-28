@@ -1,14 +1,44 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const crypto = require('crypto');
 const { Clerk } = require('@clerk/backend');
 const blockchainRoutes = require('./routes/blockchainRoutes');
-require('dotenv').config();
+const goldRoutes = require('./routes/gold');
+const requestLogger = require('./middlewares/requestLogger');
+const errorHandler = require('./middlewares/errorHandler');
+const { notFoundHandler } = require('./middlewares/errorHandler');
+const logger = require('./utils/logger');
+const db = require('./db');
+const { initBlockchain } = require('./services/blockchain');
+const { startIndexer, stopIndexer } = require('./services/indexer');
+const { getHealthSnapshot } = require('./services/health');
+const { startPriceScheduler, stopPriceScheduler } = require('./services/price');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const corsOrigins = String(process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors(
+    corsOrigins.includes('*')
+      ? {}
+      : {
+          origin: (origin, callback) => {
+            if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+            return callback(new Error('CORS origin not allowed'));
+          },
+        }
+  )
+);
+app.use(express.json({ limit: '1mb' }));
+app.use(requestLogger);
 app.use('/api/blockchain', blockchainRoutes);
+app.use('/api/v1/gold', goldRoutes);
 
 const HTTP_TIMEOUT_MS = Number(process.env.DASHBOARD_HTTP_TIMEOUT_MS || 12000);
 const CACHE_TTL_MS = Number(process.env.DASHBOARD_CACHE_TTL_MS || 45000);
@@ -32,6 +62,21 @@ const TREASURY_TOKENS = [
 const dashboardCache = new Map();
 const clerkSecretKey = process.env.CLERK_SECRET_KEY;
 const clerk = clerkSecretKey ? Clerk({ secretKey: clerkSecretKey }) : null;
+const staticAdminToken = String(process.env.ADMIN_AUTH_TOKEN || '').trim();
+
+const extractBearerToken = (authorizationHeader = '') => {
+  if (typeof authorizationHeader !== 'string') return '';
+  if (!authorizationHeader.toLowerCase().startsWith('bearer ')) return '';
+  return authorizationHeader.slice(7).trim();
+};
+
+const tokenMatches = (expected, received) => {
+  if (!expected || !received) return false;
+  const expectedBuffer = Buffer.from(expected);
+  const receivedBuffer = Buffer.from(received);
+  if (expectedBuffer.length !== receivedBuffer.length) return false;
+  return crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
+};
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -53,6 +98,20 @@ const fetchJson = async (url, options = {}) => {
   return response.data;
 };
 
+const fetchText = async (url, options = {}) => {
+  const response = await axios.get(url, {
+    timeout: HTTP_TIMEOUT_MS,
+    headers: {
+      Accept: '*/*',
+      'User-Agent': 'PHENOX-Dashboard/1.0',
+      ...options.headers,
+    },
+    responseType: 'text',
+    ...options,
+  });
+  return String(response.data || '');
+};
+
 const withCache = async (cacheKey, fetcher, ttl = CACHE_TTL_MS) => {
   const now = Date.now();
   const cached = dashboardCache.get(cacheKey);
@@ -64,14 +123,161 @@ const withCache = async (cacheKey, fetcher, ttl = CACHE_TTL_MS) => {
   return payload;
 };
 
-const getGoldPriceSnapshot = () => {
+const OUNCE_TO_GRAM = 31.1034768;
+
+const getStaticGoldPriceSnapshot = () => {
   const usdPerGram = 64.0;
-  const inrPerUSD = 83.0;
+  const usdInr = 83.0;
   return {
     usd: usdPerGram,
-    inr: usdPerGram * inrPerUSD,
+    inr: usdPerGram * usdInr,
+    usdPerOunce: usdPerGram * OUNCE_TO_GRAM,
+    usdInr,
+    source: 'Static fallback',
     timestamp: Date.now(),
   };
+};
+
+const parseCsvQuote = (csvText) => {
+  const lines = String(csvText || '').trim().split('\n');
+  if (lines.length < 2) throw new Error('CSV quote is missing data row');
+  const row = lines[1].split(',').map((value) => value.trim());
+  return {
+    symbol: row[0],
+    date: row[1],
+    time: row[2],
+    open: toSafeNumber(row[3]),
+    high: toSafeNumber(row[4]),
+    low: toSafeNumber(row[5]),
+    close: toSafeNumber(row[6]),
+  };
+};
+
+const getLiveGoldPriceSnapshot = async () => {
+  const [xauCsv, fxCsv] = await Promise.all([
+    fetchText('https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlcv&h&e=csv'),
+    fetchText('https://stooq.com/q/l/?s=usdinr&f=sd2t2ohlcv&h&e=csv'),
+  ]);
+
+  const xauQuote = parseCsvQuote(xauCsv);
+  const fxQuote = parseCsvQuote(fxCsv);
+  if (!xauQuote.close || !fxQuote.close) {
+    throw new Error('Live quote returned invalid close value');
+  }
+
+  const usdPerOunce = xauQuote.close;
+  const usdPerGram = usdPerOunce / OUNCE_TO_GRAM;
+  const usdInr = fxQuote.close;
+  const inrPerGram = usdPerGram * usdInr;
+
+  return {
+    usd: usdPerGram,
+    inr: inrPerGram,
+    usdPerOunce,
+    usdInr,
+    source: 'Stooq live quotes (XAUUSD + USDINR)',
+    quoteTimestamp: `${xauQuote.date} ${xauQuote.time} UTC`,
+    timestamp: Date.now(),
+  };
+};
+
+const htmlDecode = (raw = '') =>
+  String(raw)
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const extractTag = (block, tag) => {
+  const match = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return htmlDecode(match?.[1] || '');
+};
+
+const parseRssItems = (xml, sourceLabel) => {
+  const blocks = String(xml || '').match(/<item\b[\s\S]*?<\/item>/gi) || [];
+  return blocks.map((block, index) => {
+    const title = extractTag(block, 'title');
+    const url = extractTag(block, 'link');
+    const description = extractTag(block, 'description');
+    const publishedRaw = extractTag(block, 'pubDate');
+    const publishedDate = publishedRaw ? new Date(publishedRaw) : new Date();
+    const publishedAt = Number.isNaN(publishedDate.getTime()) ? new Date().toISOString() : publishedDate.toISOString();
+    const textBlob = `${title} ${description}`.toLowerCase();
+    const categories = [
+      ...(textBlob.includes('rwa') || textBlob.includes('tokeniz') ? ['RWA'] : []),
+      ...(textBlob.includes('gold') || textBlob.includes('xau') ? ['Gold'] : []),
+      ...(textBlob.includes('stablecoin') || textBlob.includes('usdc') || textBlob.includes('usdt') ? ['Stablecoin'] : []),
+    ];
+
+    return {
+      id: `${sourceLabel.toLowerCase().replace(/\s+/g, '-')}-${index}-${Buffer.from(title || `${index}`).toString('hex').slice(0, 12)}`,
+      title: title || 'Untitled',
+      url,
+      source: sourceLabel,
+      body: description,
+      categories: categories.length ? categories : ['General'],
+      imageUrl: '',
+      publishedAt,
+    };
+  });
+};
+
+const getLiveNewsFallback = async (limit, categories) => {
+  const query = String(categories || 'RWA,Gold,Stablecoin')
+    .split(',')
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .join(' OR ');
+
+  const feeds = [
+    {
+      label: 'Google News',
+      url: `https://news.google.com/rss/search?q=${encodeURIComponent(`(${query})`)}&hl=en-US&gl=US&ceid=US:en`,
+    },
+    {
+      label: 'CoinDesk RSS',
+      url: 'https://www.coindesk.com/arc/outboundfeeds/rss/',
+    },
+  ];
+
+  const settled = await Promise.allSettled(
+    feeds.map(async (feed) => ({
+      label: feed.label,
+      xml: await fetchText(feed.url),
+    }))
+  );
+
+  const merged = settled.flatMap((item) => {
+    if (item.status !== 'fulfilled') return [];
+    return parseRssItems(item.value.xml, item.value.label);
+  });
+
+  const keywords = String(categories || '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+
+  const filtered = merged.filter((entry) => {
+    if (!keywords.length) return true;
+    const text = `${entry.title} ${entry.body} ${(entry.categories || []).join(' ')}`.toLowerCase();
+    return keywords.some((keyword) => text.includes(keyword));
+  });
+
+  const deduped = [];
+  const seen = new Set();
+  for (const item of filtered) {
+    const key = item.title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  const sorted = deduped.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+  return sorted.slice(0, limit);
 };
 
 const getRpcUrl = () => process.env.ETHEREUM_RPC_URL || FALLBACK_ETH_RPC_URL;
@@ -205,12 +411,21 @@ const mockNewsItems = (limit, reason) => {
 
 // Middleware to verify Clerk session
 const requireAuth = async (req, res, next) => {
+  if (staticAdminToken) {
+    const sessionToken = extractBearerToken(req.headers.authorization);
+    if (!tokenMatches(staticAdminToken, sessionToken)) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    req.userId = 'admin-token';
+    return next();
+  }
+
   if (!clerk) {
     req.userId = 'demo-admin';
     return next();
   }
 
-  const sessionToken = req.headers.authorization?.split(' ')[1];
+  const sessionToken = extractBearerToken(req.headers.authorization);
   if (!sessionToken) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const session = await clerk.sessions.verifySession({ sessionId: sessionToken });
@@ -229,9 +444,14 @@ app.post('/api/log', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
-// GET /api/gold-price - existing commodities source
-app.get('/api/gold-price', (req, res) => {
-  res.json(getGoldPriceSnapshot());
+// GET /api/gold-price - live commodities source with fallback
+app.get('/api/gold-price', async (req, res) => {
+  try {
+    const live = await withCache('gold-price-live', getLiveGoldPriceSnapshot, 60_000);
+    res.json(live);
+  } catch {
+    res.json(getStaticGoldPriceSnapshot());
+  }
 });
 
 // Stablecoins: DeFiLlama Stablecoins API
@@ -379,13 +599,17 @@ app.get('/api/dashboard/news', async (req, res) => {
   try {
     const payload = await withCache(`news:${categories}:${apiKey ? 'key' : 'nokey'}:${limit}`, async () => {
       if (!apiKey) {
+        const fallbackLive = await getLiveNewsFallback(limit, categories);
+        if (!fallbackLive.length) {
+          throw new Error('No live fallback news available');
+        }
         return {
           success: true,
-          provider: 'CryptoCompare News API',
+          provider: 'CryptoCompare News API (live RSS fallback)',
           isFallback: true,
-          fallbackReason: 'CRYPTOCOMPARE_API_KEY not configured',
+          fallbackReason: 'CRYPTOCOMPARE_API_KEY not configured; using live RSS feeds',
           timestamp: new Date().toISOString(),
-          data: mockNewsItems(limit, 'Missing API key'),
+          data: fallbackLive,
         };
       }
 
@@ -421,13 +645,20 @@ app.get('/api/dashboard/news', async (req, res) => {
 
     res.json(payload);
   } catch (error) {
+    let fallbackItems = [];
+    try {
+      fallbackItems = await getLiveNewsFallback(limit, categories);
+    } catch {
+      fallbackItems = [];
+    }
+
     res.json({
       success: true,
-      provider: 'CryptoCompare News API',
+      provider: 'CryptoCompare News API (live RSS fallback)',
       isFallback: true,
       fallbackReason: error.message,
       timestamp: new Date().toISOString(),
-      data: mockNewsItems(limit, error.message),
+      data: fallbackItems.length ? fallbackItems : mockNewsItems(limit, error.message),
     });
   }
 });
@@ -548,19 +779,92 @@ app.get('/api/dashboard/us-treasuries', async (req, res) => {
   }
 });
 
-// Commodities: GoldPrice.Today (backed by existing gold-price backend source)
-app.get('/api/dashboard/commodities', (req, res) => {
-  res.json({
-    success: true,
-    provider: 'GoldPrice.Today (backend feed)',
-    timestamp: new Date().toISOString(),
-    data: {
-      ...getGoldPriceSnapshot(),
-      vaultStatus: 'Verified',
-      reserveLocation: 'Primary Vault Cluster',
-    },
-  });
+// Commodities: live gold feed with resilient fallback
+app.get('/api/dashboard/commodities', async (req, res) => {
+  try {
+    const live = await withCache('commodities-live', getLiveGoldPriceSnapshot, 60_000);
+    res.json({
+      success: true,
+      provider: 'GoldPrice.Today compatible live feed',
+      isFallback: false,
+      timestamp: new Date().toISOString(),
+      data: {
+        ...live,
+        vaultStatus: 'Verified',
+        reserveLocation: 'Primary Vault Cluster',
+      },
+    });
+  } catch (error) {
+    res.json({
+      success: true,
+      provider: 'GoldPrice.Today compatible live feed',
+      isFallback: true,
+      fallbackReason: error.message,
+      timestamp: new Date().toISOString(),
+      data: {
+        ...getStaticGoldPriceSnapshot(),
+        vaultStatus: 'Verified',
+        reserveLocation: 'Primary Vault Cluster',
+      },
+    });
+  }
 });
 
+app.get('/health', async (req, res, next) => {
+  try {
+    const health = await getHealthSnapshot();
+    return res.status(health.ok ? 200 : 503).json(health);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.use(notFoundHandler);
+app.use(errorHandler);
+
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+let server = null;
+
+const bootstrap = async () => {
+  startPriceScheduler();
+
+  try {
+    await initBlockchain();
+    await startIndexer();
+  } catch (error) {
+    logger.warn('Blockchain indexer disabled at startup: %s', error.message);
+  }
+
+  server = app.listen(PORT, () => {
+    logger.info('Backend running on port %d', Number(PORT));
+  });
+};
+
+const shutdown = async (signal) => {
+  logger.info('%s received, shutting down backend', signal);
+  stopIndexer();
+  stopPriceScheduler();
+
+  await db.closePool().catch((error) => {
+    logger.warn('PostgreSQL close failed during shutdown: %s', error.message);
+  });
+
+  if (server) {
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+
+bootstrap().catch((error) => {
+  logger.error('Fatal startup error: %s', error.message);
+  process.exit(1);
+});
