@@ -64,6 +64,9 @@ type TreasuryItem = {
 type CommoditiesData = {
   usd: number;
   inr: number;
+  india24kRetailInr?: number;
+  india24kRetailSource?: string;
+  india24kRetailUpdatedAt?: string;
   vaultStatus?: string;
   reserveLocation?: string;
 };
@@ -126,9 +129,9 @@ const TABS: Array<{
   {
     key: 'commodities',
     label: 'Commodities',
-    provider: 'GoldPrice.Today',
+    provider: 'Stooq spot + GoldMeter India 24K benchmark',
     icon: Activity,
-    category: 'Live Gold Prices & Vault Status',
+    category: 'Live spot gold plus India 24K retail benchmark',
   },
 ];
 
@@ -154,7 +157,7 @@ export default function PublicAnalytics() {
   const [activeTab, setActiveTab] = useState<TabKey>('stablecoins');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<string>('—');
+  const [lastUpdated, setLastUpdated] = useState<string>('--');
 
   const [stablecoins, setStablecoins] = useState<{ summary?: any; data: StablecoinItem[] }>({ data: [] });
   const [market, setMarket] = useState<{ summary?: any; data: MarketCoin[] }>({ data: [] });
@@ -258,8 +261,10 @@ export default function PublicAnalytics() {
 
   useEffect(() => {
     if (!authLoaded) return;
-    fetchDashboard(false);
-    const interval = setInterval(() => fetchDashboard(true), 30000);
+    void fetchDashboard(false);
+    const interval = setInterval(() => {
+      void fetchDashboard(true);
+    }, 30000);
     return () => clearInterval(interval);
   }, [backendUrl, authLoaded]);
 
@@ -288,10 +293,10 @@ export default function PublicAnalytics() {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-gray-500 font-mono hidden lg:block">
-            {user?.primaryEmailAddress?.emailAddress || 'Guest Session'}
+            {user?.primaryEmailAddress?.emailAddress || 'SECURE DATA SESSION'}
           </span>
           <button
-            onClick={() => fetchDashboard(false)}
+            onClick={() => void fetchDashboard(false)}
             className="text-xs border border-[#FFD700]/30 text-[#FFD700] px-3 py-1.5 rounded hover:bg-[#FFD700]/10 transition-all font-mono flex items-center gap-2"
           >
             <RefreshCw size={12} />
@@ -345,7 +350,7 @@ export default function PublicAnalytics() {
                     <td className="px-3 py-3">{item.location}</td>
                     <td className="px-3 py-3">{item.onChain?.status || 'PENDING'}</td>
                     <td className="px-3 py-3 text-xs text-gray-500">
-                      {item.timestamp ? new Date(item.timestamp).toLocaleString() : '—'}
+                      {item.timestamp ? new Date(item.timestamp).toLocaleString() : '--'}
                     </td>
                   </tr>
                 ))}
@@ -427,7 +432,7 @@ export default function PublicAnalytics() {
                             {(item.chainDistribution || [])
                               .slice(0, 2)
                               .map((chain) => `${chain.chain} (${chain.sharePct.toFixed(1)}%)`)
-                              .join(', ') || '—'}
+                              .join(', ') || '--'}
                           </td>
                         </tr>
                       ))}
@@ -517,10 +522,10 @@ export default function PublicAnalytics() {
                       {networks.data.map((item) => (
                         <tr key={item.name} className="border-b border-white/[0.04]">
                           <td className="px-3 py-3 font-semibold">{item.name}</td>
-                          <td className="px-3 py-3">{item.chainId ?? '—'}</td>
-                          <td className="px-3 py-3">{item.tvlUsd == null ? '—' : compactMoney(item.tvlUsd)}</td>
+                          <td className="px-3 py-3">{item.chainId ?? '--'}</td>
+                          <td className="px-3 py-3">{item.tvlUsd == null ? '--' : compactMoney(item.tvlUsd)}</td>
                           <td className="px-3 py-3">{item.activeAddresses24h ?? 'N/A'}</td>
-                          <td className="px-3 py-3 text-xs text-gray-500">{item.activeAddressesSource || '—'}</td>
+                          <td className="px-3 py-3 text-xs text-gray-500">{item.activeAddressesSource || '--'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -568,8 +573,15 @@ export default function PublicAnalytics() {
               {activeTab === 'commodities' && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <MetricCard label="Gold Price (USD/g)" value={money(commodities?.usd, 2)} />
-                  <MetricCard label="Gold Price (INR/g)" value={`₹${Number(commodities?.inr || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`} />
+                  <MetricCard
+                    label="India 24K Gold (INR/g)"
+                    value={`INR ${Number(commodities?.india24kRetailInr || commodities?.inr || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                  />
                   <MetricCard label="Vault Status" value={commodities?.vaultStatus || 'Verified'} />
+                  <div className="md:col-span-3 text-xs text-gray-500 font-mono">
+                    Retail benchmark: {commodities?.india24kRetailSource || 'GoldMeter India 24K retail benchmark'}
+                    {commodities?.india24kRetailUpdatedAt ? ` | ${commodities.india24kRetailUpdatedAt}` : ''}
+                  </div>
                 </div>
               )}
             </>

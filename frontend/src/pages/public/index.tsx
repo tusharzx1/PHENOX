@@ -75,7 +75,7 @@ export default function PublicHome() {
         <div className="font-mono font-bold text-xl text-[#FFD700] tracking-widest">&gt;_ PHENOX</div>
         <div className="flex items-center gap-6">
           <span className="text-xs text-gray-500 font-mono hidden md:block">
-            {user?.primaryEmailAddress?.emailAddress || 'Guest Session'}
+            {user?.primaryEmailAddress?.emailAddress || 'SECURE DATA SESSION'}
           </span>
           <Link href="/public/analytics" className="text-sm text-gray-400 hover:text-[#FFD700] transition-colors font-mono">Analytics</Link>
           <Link href="/admin/login" className="text-sm px-4 py-2 border border-[#FFD700]/40 text-[#FFD700] rounded hover:bg-[#FFD700]/10 transition-all font-mono">Admin Login</Link>

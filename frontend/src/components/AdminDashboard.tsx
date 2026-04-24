@@ -14,7 +14,11 @@ import {
   MoreVertical,
   Search,
   Zap,
-  Cpu
+  Cpu,
+  File,
+  UploadCloud,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -28,6 +32,12 @@ const AdminDashboard = ({ isDemo = false }: { isDemo?: boolean }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState({ batchId: '', weight: '', purity: 24, location: '', certification: '', isPublic: true });
+  
+  // Certificate verification states
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [certValid, setCertValid] = useState(false);
+  const [extractedData, setExtractedData] = useState<any>(null);
+  const [verificationFeedback, setVerificationFeedback] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -67,14 +77,69 @@ const AdminDashboard = ({ isDemo = false }: { isDemo?: boolean }) => {
 
   const handleAddBatch = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!certValid) {
+      alert('A valid certificate must be verified before adding to the ledger.');
+      return;
+    }
     try {
       await axios.post(`${API_BASE}/batches`, formData);
       setShowAddModal(false);
       fetchData();
-      setFormData({ batchId: '', weight: '', purity: 24, location: '', certification: '', isPublic: true });
+      resetForm();
     } catch (err) {
       alert('Submission failed. Ensure backend is running.');
     }
+  };
+
+  const handleCertificateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsVerifying(true);
+    setCertValid(false);
+    setVerificationFeedback('ANALYZING DOCUMENT...');
+
+    const uploadData = new FormData();
+    uploadData.append('certificate', file);
+
+    try {
+      // Note: Endpoint is on /api, not /api/v1
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'}/api/verify-certificate`, uploadData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      const data = response.data;
+      if (data.isValid) {
+        setCertValid(true);
+        setExtractedData(data.extractedData);
+        setVerificationFeedback(`VERIFIED: ${data.extractedData.assayer || 'ASSAYER'} CERTIFIED`);
+        
+        // Auto-populate form
+        setFormData(prev => ({
+          ...prev,
+          batchId: data.extractedData.serialNumber || prev.batchId,
+          weight: data.extractedData.grossWeight ? String(data.extractedData.grossWeight) : prev.weight,
+          purity: data.extractedData.purity && data.extractedData.purity.includes('24') ? 24 : 
+                  data.extractedData.purity && data.extractedData.purity.includes('22') ? 22 : prev.purity
+        }));
+      } else {
+        setCertValid(false);
+        setVerificationFeedback(`REJECTED: ${data.reason}`);
+      }
+    } catch (err: any) {
+      console.error('Verification Error:', err);
+      setCertValid(false);
+      setVerificationFeedback(err.response?.data?.message || 'VERIFICATION SERVICE UNAVAILABLE');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({ batchId: '', weight: '', purity: 24, location: '', certification: '', isPublic: true });
+    setCertValid(false);
+    setExtractedData(null);
+    setVerificationFeedback('');
   };
 
   return (
@@ -224,6 +289,41 @@ const AdminDashboard = ({ isDemo = false }: { isDemo?: boolean }) => {
                 <Plus className="text-[#00E5FF]" /> Initialize Ledger Record
               </h2>
               <form onSubmit={handleAddBatch} className="space-y-6">
+                {/* Certificate analysis gate */}
+                <div className="p-4 rounded-2xl border border-white/10 bg-white/5 space-y-3 relative overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-[#00E5FF] uppercase font-mono tracking-widest flex items-center gap-2">
+                      <ShieldCheck className="w-3 h-3" /> Compliance Verification
+                    </label>
+                    {isVerifying && <div className="animate-spin w-3 h-3 border-2 border-[#00E5FF]/20 border-t-[#00E5FF] rounded-full" />}
+                  </div>
+                  
+                  <div className={`flex items-center gap-4 p-3 rounded-xl border border-dashed transition-all ${certValid ? 'border-[#00E5FF]/40 bg-[#00E5FF]/5' : 'border-white/10 hover:border-white/20'}`}>
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${certValid ? 'bg-[#00E5FF]/20 text-[#00E5FF]' : 'bg-white/5 text-white/20'}`}>
+                      {certValid ? <CheckCircle2 className="w-5 h-5 shadow-[0_0_10px_rgba(0,229,255,0.4)]" /> : <UploadCloud className="w-5 h-5" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] font-bold uppercase truncate">
+                        {verificationFeedback || 'Upload Assayer Certificate'}
+                      </div>
+                      <div className="text-[8px] text-white/40 uppercase font-mono mt-0.5">
+                        {isVerifying ? 'Scanning with Gemini AI...' : certValid ? 'Verification Succeeded' : 'PDF, JPG or PNG (MAX 20MB)'}
+                      </div>
+                    </div>
+                    <label className="cursor-pointer px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[9px] font-bold uppercase border border-white/10 transition-all">
+                      Browse
+                      <input type="file" className="hidden" accept="image/*,application/pdf" onChange={handleCertificateUpload} disabled={isVerifying} />
+                    </label>
+                  </div>
+                  
+                  {!certValid && !isVerifying && verificationFeedback && verificationFeedback.includes('REJECTED') && (
+                    <div className="flex items-start gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-[8px] text-red-400 uppercase leading-relaxed">
+                      <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                      <span>{verificationFeedback}</span>
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] text-white/40 uppercase font-mono pl-1">Batch Identifier</label>
@@ -258,8 +358,10 @@ const AdminDashboard = ({ isDemo = false }: { isDemo?: boolean }) => {
                 <div className="flex gap-4 pt-4">
                   <button type="button" onClick={() => setShowAddModal(false)}
                     className="flex-1 py-3 rounded-xl border border-white/10 hover:bg-white/5 text-xs font-bold uppercase">Abort</button>
-                  <button type="submit"
-                    className="flex-1 px-8 py-3 rounded-xl bg-[#00E5FF] text-black font-black uppercase text-xs">Write To Ledger</button>
+                  <button type="submit" disabled={!certValid || isVerifying}
+                    className={`flex-1 px-8 py-3 rounded-xl font-black uppercase text-xs transition-all ${certValid && !isVerifying ? 'bg-[#00E5FF] text-black neon-glow-cyan' : 'bg-white/5 text-white/20 cursor-not-allowed'}`}>
+                    {isVerifying ? 'Verifying...' : 'Write To Ledger'}
+                  </button>
                 </div>
               </form>
             </motion.div>

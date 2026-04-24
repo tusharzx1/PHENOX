@@ -16,7 +16,7 @@ const db = require('./db');
 const { initBlockchain } = require('./services/blockchain');
 const { startIndexer, stopIndexer } = require('./services/indexer');
 const { getHealthSnapshot } = require('./services/health');
-const { startPriceScheduler, stopPriceScheduler } = require('./services/price');
+const { fetchGoldPrice, getCurrentGoldPrice, startPriceScheduler, stopPriceScheduler } = require('./services/price');
 
 const app = express();
 const corsOrigins = String(process.env.CORS_ORIGIN || '*')
@@ -162,6 +162,31 @@ const getLiveGoldPriceSnapshot = async () => {
     usdInr,
     source: 'Stooq live quotes (XAUUSD + USDINR)',
     quoteTimestamp: `${xauQuote.date} ${xauQuote.time} UTC`,
+    timestamp: Date.now(),
+  };
+};
+
+const getLiveIndiaRetailGoldSnapshot = async () => {
+  const html = await fetchText('https://goldmeter.in/');
+  const normalized = htmlDecode(html);
+
+  const perGram24kMatch = normalized.match(/₹\s*([\d,]+)\s*per gram for 24K/i);
+  const updatedMatch = normalized.match(/Verified from IBJA\|([^|]+)\|Source: GoldMeter\.in/i);
+
+  if (!perGram24kMatch) {
+    throw new Error('GoldMeter page did not expose the India 24K per gram rate.');
+  }
+
+  const retailInrPerGram = toSafeNumber(String(perGram24kMatch[1]).replace(/,/g, ''));
+  if (!retailInrPerGram) {
+    throw new Error('India 24K retail rate parsed as invalid.');
+  }
+
+  return {
+    inr: retailInrPerGram,
+    source: 'GoldMeter India 24K retail benchmark',
+    sourceUrl: 'https://goldmeter.in/',
+    quoteTimestamp: updatedMatch ? updatedMatch[1].trim() : '',
     timestamp: Date.now(),
   };
 };
@@ -618,10 +643,13 @@ app.post('/api/log', requireAdminAuth, (req, res) => {
 // GET /api/gold-price - live commodities source with fallback
 app.get('/api/gold-price', async (req, res) => {
   try {
-    const live = await withCache('gold-price-live', getLiveGoldPriceSnapshot, 60_000);
+    const current = getCurrentGoldPrice();
+    const lastUpdatedMs = current?.lastUpdated ? new Date(current.lastUpdated).getTime() : 0;
+    const isStale = !lastUpdatedMs || Number.isNaN(lastUpdatedMs) || Date.now() - lastUpdatedMs > 60_000;
+    const live = isStale ? await fetchGoldPrice() : current;
     res.json(live);
   } catch {
-    res.json(getStaticGoldPriceSnapshot());
+    res.json(getCurrentGoldPrice());
   }
 });
 
@@ -938,14 +966,21 @@ app.get('/api/dashboard/us-treasuries', async (req, res) => {
 // Commodities: live gold feed with resilient fallback
 app.get('/api/dashboard/commodities', async (req, res) => {
   try {
-    const live = await withCache('commodities-live', getLiveGoldPriceSnapshot, 60_000);
+    const [spot, retailIndia] = await Promise.all([
+      withCache('commodities-live-spot', getLiveGoldPriceSnapshot, 60_000),
+      withCache('commodities-live-india-retail', getLiveIndiaRetailGoldSnapshot, 60_000),
+    ]);
+
     res.json({
       success: true,
-      provider: 'GoldPrice.Today compatible live feed',
+      provider: 'Stooq spot + GoldMeter India 24K benchmark',
       isFallback: false,
       timestamp: new Date().toISOString(),
       data: {
-        ...live,
+        ...spot,
+        india24kRetailInr: retailIndia.inr,
+        india24kRetailSource: retailIndia.source,
+        india24kRetailUpdatedAt: retailIndia.quoteTimestamp,
         vaultStatus: 'Verified',
         reserveLocation: 'Primary Vault Cluster',
       },
@@ -953,12 +988,15 @@ app.get('/api/dashboard/commodities', async (req, res) => {
   } catch (error) {
     res.json({
       success: true,
-      provider: 'GoldPrice.Today compatible live feed',
+      provider: 'Stooq spot + GoldMeter India 24K benchmark',
       isFallback: true,
       fallbackReason: error.message,
       timestamp: new Date().toISOString(),
       data: {
         ...getStaticGoldPriceSnapshot(),
+        india24kRetailInr: 15295,
+        india24kRetailSource: 'GoldMeter India 24K retail benchmark',
+        india24kRetailUpdatedAt: '24 April 2026, 3:41 pm',
         vaultStatus: 'Verified',
         reserveLocation: 'Primary Vault Cluster',
       },

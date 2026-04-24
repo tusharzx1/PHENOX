@@ -1,127 +1,204 @@
-PHENOX – Gold RWA Platform on Monad
-PHENOX tokenizes physical gold on the Monad blockchain, combining institutional‑grade security with a social marketplace. Admins authenticate using face recognition + OTP to mint PGOLD tokens (1 token = 1 gram), while every gold batch (weight, purity, location) is recorded immutably on‑chain. The public dashboard lets users connect wallets, trade gold, view real‑time analytics (price, market cap, holder leaderboard), and engage in a social feed where trades automatically generate posts. Built with Next.js, Node.js, PostgreSQL, and Solidity, PHENOX brings transparency, accessibility, and community to gold investment.
+# PHENOX
 
-Live demo: https://phenox-gold-rwa.web.app
+PHENOX is a cyberpunk-style gold RWA dashboard and admin terminal built with a Next.js frontend, an Express backend, and Monad-oriented contract flows.
 
-🌟 Features
-🔐 Biometric Admin Security – Face login + OTP via Clerk; only authorised admins can mint or burn tokens.
+This repo currently includes:
 
-📜 On‑Chain Gold Batches – Each batch (weight, purity, location, certification) stored in a smart contract; fully transparent.
+- a public analytics dashboard
+- an admin dashboard with local demo auth
+- backend dashboard APIs with fallback/mock data for demo reliability
+- Firebase Hosting support for the exported frontend
 
-💬 Public Marketplace & Social Feed – Users connect wallet, buy/sell PGOLD, and post updates. On‑chain events auto‑generate feed entries.
+## Stack
 
-📊 Real‑Time Analytics Dashboard – Gold price (USD/INR), total supply, market cap, holder leaderboard, transaction feed, and public gold batch ledger.
+- Frontend: Next.js 14, React 18, Tailwind CSS, Framer Motion, Three.js
+- Backend: Node.js, Express, Axios, PostgreSQL client, Ethers
+- Auth: local demo auth shim in the frontend
+- Hosting: Firebase Hosting for the static frontend build
+- Contracts: Solidity contracts in `contracts/`
 
-⚡ Built on Monad – High throughput, low fees, EVM‑compatible.
+## Repo Layout
 
-🔌 Custom Indexer & APIs – Node.js backend listens to contract events, stores data in PostgreSQL, serves REST endpoints.
+- `frontend/` - main Next.js app
+- `backend/` - Express API server
+- `contracts/` - Solidity contracts and scripts
+- `public-panel/` - separate Next.js prototype
+- `firebase.json` - Firebase Hosting config for the exported frontend
 
-🛠 Tech Stack
-Layer	Technology
-Frontend	Next.js, Tailwind CSS, Clerk (auth), ethers.js
-Backend	Node.js, Express, PostgreSQL, node-cron, axios
-Blockchain	Solidity, Hardhat, Monad testnet
-APIs	GoldPrice.Today (gold price), DeFiLlama (stablecoins)
-Deployment	Firebase Hosting (frontend), Render (backend)
-🚀 Quick Start
-Prerequisites
-Node.js v18+
+## App Overview
 
-PostgreSQL
+### Public dashboard
 
-MetaMask (or any EVM wallet)
+Routes:
 
-Monad testnet RPC (e.g., from Ankr)
+- `/public`
+- `/public/analytics`
 
-1. Clone the repository
-bash
-git clone https://github.com/your-username/phenox.git
-cd phenox
-2. Smart Contracts
-bash
-cd contracts
-npm install
-# Create .env with PRIVATE_KEY and MONAD_RPC_URL
-npx hardhat run scripts/deploy.js --network monadTestnet
-# Save the deployed contract addresses
-3. Backend
-bash
+The public dashboard is open in the current hackathon setup and does not require Clerk sign-in.
+
+### Admin dashboard
+
+Routes:
+
+- `/admin/login`
+- `/admin/dashboard`
+
+The admin flow currently supports local demo auth.
+
+Demo login:
+
+- email containing `admin`
+- password `admin123`
+
+### Backend fallback behavior
+
+The backend is designed to return fallback data for demo-critical dashboard endpoints when live providers are unavailable.
+
+This includes:
+
+- stablecoins
+- market overview
+- news
+- networks
+- treasuries
+- commodities
+
+## Local Development
+
+### Requirements
+
+- Node.js 18+
+- npm
+
+Optional for fuller backend behavior:
+
+- PostgreSQL
+- Monad RPC and deployed contract addresses
+- Clerk keys
+
+### Install dependencies
+
+Frontend:
+
+```bash
+cd frontend
+npm install --legacy-peer-deps
+```
+
+Backend:
+
+```bash
 cd backend
 npm install
-cp .env.example .env
-# Edit .env with DATABASE_URL, contract addresses, CLERK_SECRET_KEY
-npm run migrate   # runs PostgreSQL migrations
-npm run dev
-4. Frontend
-bash
+```
+
+### Environment files
+
+Frontend:
+
+- `frontend/.env.local`
+
+Minimal frontend value:
+
+```env
+NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
+```
+
+Backend:
+
+- `backend/.env`
+
+Minimal local backend values can be enough to boot the demo server, but full blockchain and database features require the values from `backend/.env.example`.
+
+### Run locally
+
+Backend:
+
+```bash
+cd backend
+node server.js
+```
+
+Frontend:
+
+```bash
 cd frontend
-npm install
-cp .env.local.example .env.local
-# Add NEXT_PUBLIC_API_URL (backend URL), Clerk keys, contract addresses
 npm run dev
-5. Open your browser
-Frontend: http://localhost:3000
+```
 
-Backend: http://localhost:3001
+Local URLs:
 
-🔧 Environment Variables
-Backend .env
-text
-MONAD_RPC_URL=https://rpc.ankr.com/monad_testnet
-GOLD_TOKEN_ADDRESS=0x...
-BATCH_MANAGER_ADDRESS=0x...
-DATABASE_URL=postgresql://user:pass@localhost:5432/phenox
-PORT=3001
-CLERK_SECRET_KEY=sk_...
-Frontend .env.local
-text
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
-NEXT_PUBLIC_API_URL=http://localhost:3001
-NEXT_PUBLIC_MONAD_RPC_URL=https://rpc.ankr.com/monad_testnet
-NEXT_PUBLIC_GOLD_TOKEN_ADDRESS=0x...
-📁 Project Structure
-text
-phenox/
-├── contracts/            # Hardhat project
-│   ├── contracts/        # GoldToken.sol, GoldBatchManager.sol
-│   ├── scripts/          # deploy.js
-│   └── hardhat.config.js
-├── backend/              # Node.js server
-│   ├── routes/           # API endpoints
-│   ├── services/         # blockchain, price, indexer
-│   ├── db/               # PostgreSQL connection & migrations
-│   ├── middlewares/
-│   ├── utils/
-│   └── server.js
-├── frontend/             # Next.js app
-│   ├── pages/            # /admin/login, /admin/dashboard, /public/analytics
-│   ├── components/
-│   ├── hooks/
-│   ├── abi/              # Contract ABIs
-│   ├── styles/
-│   └── next.config.js
-└── README.md
-🧪 Testing
-Smart Contracts: cd contracts && npx hardhat test
+- frontend: `http://localhost:3000`
+- backend: `http://localhost:3001`
 
-Backend: Use Postman or curl to test endpoints (see /backend/README.md)
+## Useful Backend Routes
 
-Frontend: Manual testing of login, wallet connection, and transactions
+- `GET /api/gold-price`
+- `GET /api/dashboard/stablecoins`
+- `GET /api/dashboard/market-overview`
+- `GET /api/dashboard/news`
+- `GET /api/dashboard/networks`
+- `GET /api/dashboard/us-treasuries`
+- `GET /api/dashboard/commodities`
+- `GET /api/blockchain/public/records`
 
-🚢 Deployment
-Frontend: cd frontend && firebase deploy (after setting up Firebase Hosting)
+## Firebase Hosting
 
-Backend: Deploy on Render or Railway – connect GitHub repo, set environment variables
+This repo is configured to deploy the exported frontend from:
 
-Database: Use MongoDB Atlas or Supabase (PostgreSQL)
+- `frontend/out`
 
-🤝 Contributing
-Contributions are welcome! Please open an issue or submit a pull request. Follow the existing coding standards and include tests for new features.
+Build the frontend:
 
-📄 License
-MIT © PHENOX Team
+```bash
+cd frontend
+npm run build
+```
 
-🌐 Live Demo
-https://phenox-gold-rwa.web.app
+Deploy:
 
+```bash
+cd ..
+firebase deploy --only hosting
+```
 
+Firebase project:
+
+- `phenox-gold-rwa`
+
+Live URL:
+
+- `https://phenox-gold-rwa.web.app`
+
+## Important Deployment Note
+
+Firebase Hosting deploys the frontend only.
+
+If the frontend is built with `NEXT_PUBLIC_BACKEND_URL=http://localhost:3001`, public dashboard API calls will fail outside your local machine. For a fully live demo, rebuild the frontend with a real public backend URL.
+
+## Smart Contracts
+
+Contracts live in `contracts/`.
+
+Typical commands:
+
+```bash
+cd contracts
+npm install
+npx hardhat compile
+```
+
+Monad testnet reference:
+
+- RPC: `https://testnet-rpc.monad.xyz`
+- Chain ID: `10143`
+- Explorer: `https://testnet.monadvision.com`
+
+## Hackathon Notes
+
+This codebase is currently optimized for demo reliability over strict production setup:
+
+- public routes do not require Clerk
+- admin login supports demo credentials
+- backend dashboard endpoints prefer fallback data over blank failure states
+- Firebase Hosting serves a static export of the frontend

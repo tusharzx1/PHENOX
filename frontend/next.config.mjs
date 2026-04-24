@@ -1,6 +1,10 @@
 /** @type {import('next').Config} */
 const nextConfig = {
   reactStrictMode: true,
+  output: 'export',
+  images: {
+    unoptimized: true,
+  },
   env: {
     NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL,
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,

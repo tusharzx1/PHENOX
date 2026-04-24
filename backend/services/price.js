@@ -5,14 +5,45 @@ const logger = require('../utils/logger');
 const { toNumber } = require('../utils/helpers');
 
 const OUNCE_TO_GRAM = 31.1034768;
+const HTTP_TIMEOUT_MS = Number(process.env.DASHBOARD_HTTP_TIMEOUT_MS || 12000);
 
 let cronTask = null;
 let cachedPrice = {
   usd: 64.0,
   inr: 5312.0,
   source: 'Static fallback',
+  usdPerOunce: 64.0 * OUNCE_TO_GRAM,
+  usdInr: 83.0,
+  quoteTimestamp: null,
   lastUpdated: null,
   isFallback: true,
+};
+
+const fetchText = async (url) => {
+  const response = await axios.get(url, {
+    timeout: HTTP_TIMEOUT_MS,
+    headers: {
+      Accept: '*/*',
+      'User-Agent': 'PHENOX-Price-Service/1.0',
+    },
+    responseType: 'text',
+  });
+  return String(response.data || '');
+};
+
+const parseCsvQuote = (csvText) => {
+  const lines = String(csvText || '').trim().split('\n');
+  if (lines.length < 2) throw new Error('CSV quote is missing data row');
+  const row = lines[1].split(',').map((value) => value.trim());
+  return {
+    symbol: row[0],
+    date: row[1],
+    time: row[2],
+    open: toNumber(row[3], 0),
+    high: toNumber(row[4], 0),
+    low: toNumber(row[5], 0),
+    close: toNumber(row[6], 0),
+  };
 };
 
 const persistPrice = async (price) => {
@@ -27,24 +58,52 @@ const persistPrice = async (price) => {
   }
 };
 
+const fetchGoldMeterPrice = async () => {
+  try {
+    const html = await fetchText('https://goldmeter.in/');
+    // Extract price from HTML using regex (matches ₹ 6,XXX per gram for 24K)
+    const perGram24kMatch = html.match(/₹\s*([\d,]+)\s*per gram for 24K/i);
+    if (perGram24kMatch) {
+      const price = Number(perGram24kMatch[1].replace(/,/g, ''));
+      if (price > 1000) return price;
+    }
+    return null;
+  } catch (err) {
+    logger.warn('GoldMeter fetch failed: %s', err.message);
+    return null;
+  }
+};
+
 const fetchGoldPrice = async () => {
   try {
-    const response = await axios.get('https://GoldPrice.Today/api.php?data=live', {
-      timeout: 7000,
-      headers: { Accept: 'application/json' },
-    });
+    const [xauCsv, fxCsv] = await Promise.all([
+      fetchText('https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlcv&h&e=csv'),
+      fetchText('https://stooq.com/q/l/?s=usdinr&f=sd2t2ohlcv&h&e=csv'),
+    ]);
 
-    const usdPerOunce = toNumber(response?.data?.USD?.gold_price, 0);
-    const inrPerOunce = toNumber(response?.data?.INR?.gold_price, 0);
+    const xauQuote = parseCsvQuote(xauCsv);
+    const fxQuote = parseCsvQuote(fxCsv);
 
-    if (usdPerOunce <= 0 || inrPerOunce <= 0) {
-      throw new Error('Gold price response missing USD/INR data');
+    if (!xauQuote.close || !fxQuote.close) {
+      throw new Error('Live quote returned invalid close value');
     }
 
+    const usdPerOunce = xauQuote.close;
+    const usdPerGram = usdPerOunce / OUNCE_TO_GRAM;
+    const usdInr = fxQuote.close;
+    const globalInrPerGram = usdPerGram * usdInr;
+
+    // Try to get retail price from GoldMeter as a high-fidelity 24K source
+    const retailInr = await fetchGoldMeterPrice();
+    const finalInr = retailInr || globalInrPerGram;
+
     const nextPrice = {
-      usd: usdPerOunce / OUNCE_TO_GRAM,
-      inr: inrPerOunce / OUNCE_TO_GRAM,
-      source: 'GoldPrice.Today',
+      usd: usdPerGram,
+      inr: finalInr,
+      usdPerOunce,
+      usdInr,
+      source: retailInr ? 'GoldMeter 24K Retail (Verified)' : 'Stooq Spot Price (Calculated)',
+      quoteTimestamp: `${xauQuote.date} ${xauQuote.time} UTC`,
       lastUpdated: new Date().toISOString(),
       isFallback: false,
     };

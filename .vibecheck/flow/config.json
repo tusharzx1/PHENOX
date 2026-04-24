@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "projectName": "phenoxlive",
+  "userName": "developer",
+  "skillLevel": "intermediate",
+  "outputFolder": ".vibecheck/flow",
+  "planningArtifacts": ".vibecheck\\flow\\planning-artifacts",
+  "implementationArtifacts": ".vibecheck\\flow\\implementation-artifacts",
+  "installedAt": "2026-04-24T10:28:08.622Z",
+  "ide": [
+    "vscode"
+  ]
+}
