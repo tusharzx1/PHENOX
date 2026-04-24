@@ -1,9 +1,11 @@
 require('dotenv').config();
 
 const express = require('express');
+
 const cors = require('cors');
 const axios = require('axios');
 const blockchainRoutes = require('./routes/blockchainRoutes');
+const certificateRoutes = require('./routes/certificateRoutes');
 const goldRoutes = require('./routes/gold');
 const requestLogger = require('./middlewares/requestLogger');
 const errorHandler = require('./middlewares/errorHandler');
@@ -36,6 +38,7 @@ app.use(
 );
 app.use(express.json({ limit: '1mb' }));
 app.use(requestLogger);
+app.use('/api', certificateRoutes);
 app.use('/api/blockchain', blockchainRoutes);
 app.use('/api/v1/gold', goldRoutes);
 

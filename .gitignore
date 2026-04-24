@@ -16,6 +16,8 @@ dist/
 # Environment files (keep .env.example files)
 .env
 **/.env
+.env.*
+**/.env.*
 .env.local
 **/.env.local
 .env.*.local
@@ -61,3 +63,7 @@ backend/artifacts/
 backend/cache/
 backend/typechain-types/
 backend/logs/
+backend/*.log
+frontend/*.log
+*.out.log
+*.err.log

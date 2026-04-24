@@ -29,6 +29,16 @@ const toCanonicalPayload = (batch) => ({
   purity: Number(batch.purity || 0),
   location: String(batch.location || ''),
   certification: String(batch.certification || ''),
+  certificateVerification: batch.certificateVerification
+    ? {
+        isValid: Boolean(batch.certificateVerification.isValid),
+        serialNumber: String(batch.certificateVerification?.extractedData?.serialNumber || ''),
+        grossWeight: Number(batch.certificateVerification?.extractedData?.grossWeight || 0),
+        purity: String(batch.certificateVerification?.extractedData?.purity || ''),
+        assayer: String(batch.certificateVerification?.extractedData?.assayer || ''),
+        dateOfIssue: String(batch.certificateVerification?.extractedData?.dateOfIssue || ''),
+      }
+    : null,
   isPublic: Boolean(batch.isPublic),
   timestamp: batch.timestamp ? new Date(batch.timestamp).toISOString() : new Date().toISOString()
 });
@@ -196,6 +206,7 @@ const toAdminRecord = (batch) => ({
   purity: batch.purity,
   location: batch.location,
   certification: batch.certification,
+  certificateVerification: batch.certificateVerification || null,
   isPublic: Boolean(batch.isPublic),
   adminEmail: batch.adminEmail,
   timestamp: batch.timestamp,
@@ -227,6 +238,7 @@ router.post('/admin/push', requireAdminAuth, async (req, res) => {
       purity,
       location,
       certification,
+      certificateVerification,
       isPublic = true,
       metadataURI = ''
     } = req.body;
@@ -235,6 +247,13 @@ router.post('/admin/push', requireAdminAuth, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'batchId, weight, purity and location are required'
+      });
+    }
+
+    if (!certificateVerification?.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'A valid Gemini-verified certificate is required before submitting a batch.'
       });
     }
 
@@ -247,6 +266,21 @@ router.post('/admin/push', requireAdminAuth, async (req, res) => {
       purity: Number(purity),
       location: String(location).trim(),
       certification: certification ? String(certification) : '',
+      certificateVerification: {
+        isValid: true,
+        reason: String(certificateVerification.reason || 'All checks passed.'),
+        extractedData: {
+          serialNumber: certificateVerification?.extractedData?.serialNumber || null,
+          grossWeight: Number(certificateVerification?.extractedData?.grossWeight || 0) || null,
+          purity: certificateVerification?.extractedData?.purity || null,
+          assayer: certificateVerification?.extractedData?.assayer || null,
+          dateOfIssue: certificateVerification?.extractedData?.dateOfIssue || null
+        },
+        model: String(certificateVerification.model || ''),
+        verifiedAt: certificateVerification.verifiedAt ? new Date(certificateVerification.verifiedAt) : new Date(),
+        fileName: String(certificateVerification.fileName || ''),
+        mimeType: String(certificateVerification.mimeType || '')
+      },
       isPublic: parseBool(isPublic, true),
       adminEmail,
       timestamp: new Date()

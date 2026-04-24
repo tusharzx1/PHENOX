@@ -7,6 +7,7 @@ type AdminBatchRecord = {
   purity: number;
   location: string;
   certification?: string;
+  certificateVerification?: CertificateVerification | null;
   isPublic: boolean;
   timestamp?: string;
   onChain?: {
@@ -14,6 +15,40 @@ type AdminBatchRecord = {
     txHash?: string;
     error?: string;
   };
+};
+
+type CertificateVerification = {
+  isValid: boolean;
+  reason: string;
+  extractedData: {
+    serialNumber: string | null;
+    grossWeight: number | null;
+    purity: string | null;
+    assayer: string | null;
+    dateOfIssue: string | null;
+  };
+  model?: string;
+  verifiedAt?: string;
+  fileName?: string;
+  mimeType?: string;
+};
+
+type VerificationStepStatus = 'pending' | 'active' | 'complete' | 'failed';
+
+type VerificationStep = {
+  key: string;
+  label: string;
+  description: string;
+  status: VerificationStepStatus;
+};
+
+const normalizePurityToKarat = (purity: string | null | undefined) => {
+  const value = String(purity || '').trim().toLowerCase();
+  if (!value) return 24;
+  if (value.includes('24') || value.includes('999') || value.includes('99.99')) return 24;
+  if (value.includes('22') || value.includes('91.6')) return 22;
+  if (value.includes('18') || value.includes('75')) return 18;
+  return 24;
 };
 
 export default function AdminDashboard() {
@@ -25,6 +60,10 @@ export default function AdminDashboard() {
   const [goldPrice, setGoldPrice] = useState({ usd: 0, inr: 0 });
   const [status, setStatus] = useState('');
   const [newBatch, setNewBatch] = useState({ weight: '', purity: 24, location: '', certification: '', isPublic: true });
+  const [certificateVerification, setCertificateVerification] = useState<CertificateVerification | null>(null);
+  const [isVerifyingCertificate, setIsVerifyingCertificate] = useState(false);
+  const [certificateInputKey, setCertificateInputKey] = useState(0);
+  const [verificationStep, setVerificationStep] = useState<'select' | 'upload' | 'analyze' | 'ready' | 'failed'>('select');
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
 
@@ -100,6 +139,12 @@ export default function AdminDashboard() {
 
   const addBatch = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!certificateVerification?.isValid) {
+      setStatus('Upload and verify a certificate before adding a batch.');
+      return;
+    }
+
     setStatus('Submitting batch to backend and anchoring payload hash on blockchain...');
 
     const batchId = `BATCH-${Date.now()}`;
@@ -117,6 +162,7 @@ export default function AdminDashboard() {
           purity: Number(newBatch.purity),
           location: newBatch.location,
           certification: newBatch.certification,
+          certificateVerification,
           isPublic: newBatch.isPublic,
           metadataURI: newBatch.certification ? `ipfs://${newBatch.certification}` : '',
         }),
@@ -132,9 +178,85 @@ export default function AdminDashboard() {
       setStatus(`Batch ${batchId} saved. Chain status: ${chainStatus}${txHash ? ` | Tx: ${txHash}` : ''}`);
 
       setNewBatch({ weight: '', purity: 24, location: '', certification: '', isPublic: true });
+      setCertificateVerification(null);
+      setCertificateInputKey((value) => value + 1);
+      setVerificationStep('select');
       fetchBatches();
     } catch (err: any) {
       setStatus(`Batch submit failed: ${err?.message || 'unknown error'}`);
+    }
+  };
+
+  const handleCertificateChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsVerifyingCertificate(true);
+    setCertificateVerification(null);
+    setVerificationStep('upload');
+    setStatus(`Verifying certificate "${file.name}" with Gemini...`);
+
+    try {
+      const token = isDemo ? null : await getToken();
+      const formData = new FormData();
+      formData.append('certificate', file);
+      setVerificationStep('analyze');
+
+      const response = await fetch(`${backendUrl}/api/verify-certificate`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || 'Certificate verification failed.');
+      }
+
+      const verification: CertificateVerification = {
+        isValid: Boolean(payload.isValid),
+        reason: String(payload.reason || ''),
+        extractedData: {
+          serialNumber: payload?.extractedData?.serialNumber || null,
+          grossWeight: typeof payload?.extractedData?.grossWeight === 'number'
+            ? payload.extractedData.grossWeight
+            : null,
+          purity: payload?.extractedData?.purity || null,
+          assayer: payload?.extractedData?.assayer || null,
+          dateOfIssue: payload?.extractedData?.dateOfIssue || null,
+        },
+        model: payload?.model,
+        verifiedAt: payload?.verifiedAt,
+        fileName: payload?.fileName,
+        mimeType: payload?.mimeType,
+      };
+
+      setCertificateVerification(verification);
+
+      if (!verification.isValid) {
+        event.target.value = '';
+        setVerificationStep('failed');
+        throw new Error(verification.reason || 'Certificate rejected by Gemini.');
+      }
+
+      setNewBatch((current) => ({
+        ...current,
+        weight: verification.extractedData.grossWeight !== null
+          ? String(verification.extractedData.grossWeight)
+          : current.weight,
+        purity: normalizePurityToKarat(verification.extractedData.purity),
+        certification: current.certification || verification.extractedData.serialNumber || '',
+      }));
+
+      setStatus(
+        `Certificate verified. ${verification.extractedData.serialNumber ? `Serial ${verification.extractedData.serialNumber} extracted.` : 'Required fields extracted.'}`
+      );
+      setVerificationStep('ready');
+    } catch (err: any) {
+      setVerificationStep('failed');
+      setStatus(`Certificate verification failed: ${err?.message || 'unknown error'}`);
+    } finally {
+      setIsVerifyingCertificate(false);
     }
   };
 
@@ -162,6 +284,53 @@ export default function AdminDashboard() {
   if ((!isLoaded || !isSignedIn) && !isDemo) return <div className="p-4 bg-[#050505] min-h-screen text-white flex items-center justify-center font-mono">Loading Config...</div>;
 
   const displayUser = isDemo ? `${userEthAccount} (DEMO MODE)` : user?.emailAddresses[0]?.emailAddress;
+  const verificationSteps: VerificationStep[] = [
+    {
+      key: 'select',
+      label: 'Step 1',
+      description: 'Select certificate file',
+      status:
+        verificationStep === 'select' ? 'active' :
+        ['upload', 'analyze', 'ready', 'failed'].includes(verificationStep) ? 'complete' :
+        'pending',
+    },
+    {
+      key: 'upload',
+      label: 'Step 2',
+      description: 'Upload file to backend',
+      status:
+        verificationStep === 'upload' ? 'active' :
+        ['analyze', 'ready'].includes(verificationStep) ? 'complete' :
+        verificationStep === 'failed' ? 'failed' :
+        'pending',
+    },
+    {
+      key: 'analyze',
+      label: 'Step 3',
+      description: 'Gemini analyzes certificate',
+      status:
+        verificationStep === 'analyze' ? 'active' :
+        verificationStep === 'ready' ? 'complete' :
+        verificationStep === 'failed' ? 'failed' :
+        'pending',
+    },
+    {
+      key: 'ready',
+      label: 'Step 4',
+      description: 'Batch unlocked for submission',
+      status:
+        verificationStep === 'ready' ? 'complete' :
+        verificationStep === 'failed' ? 'failed' :
+        'pending',
+    },
+  ];
+
+  const getStepClasses = (stepStatus: VerificationStepStatus) => {
+    if (stepStatus === 'complete') return 'border-green-500/40 bg-green-500/10 text-green-300';
+    if (stepStatus === 'active') return 'border-cyan-400/50 bg-cyan-500/10 text-cyan-200';
+    if (stepStatus === 'failed') return 'border-red-500/40 bg-red-500/10 text-red-300';
+    return 'border-white/10 bg-white/5 text-gray-400';
+  };
 
   return (
     <div className="min-h-screen bg-[#050505] text-white p-6 relative overflow-hidden">
@@ -195,6 +364,49 @@ export default function AdminDashboard() {
         <div className="bg-gray-800 p-6 rounded mb-8">
           <h2 className="text-xl font-bold mb-4">Add New Gold Batch</h2>
           <form onSubmit={addBatch} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2 rounded border border-cyan-500/30 bg-black/20 p-4">
+              <label className="mb-2 block text-sm text-cyan-200">Certificate File</label>
+              <input
+                key={certificateInputKey}
+                type="file"
+                accept=".pdf,image/png,image/jpeg,image/jpg,image/webp"
+                onChange={handleCertificateChange}
+                className="w-full rounded border border-white/10 bg-gray-700 p-2"
+                required
+              />
+              <p className="mt-2 text-xs text-gray-400">
+                Gemini must approve the certificate before this batch can be submitted.
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+                {verificationSteps.map((step) => (
+                  <div key={step.key} className={`rounded border p-3 text-xs ${getStepClasses(step.status)}`}>
+                    <p className="font-semibold uppercase tracking-wide">{step.label}</p>
+                    <p className="mt-1">{step.description}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 text-sm">
+                {isVerifyingCertificate && <p className="text-cyan-300">Verification in progress...</p>}
+                {!isVerifyingCertificate && certificateVerification?.isValid && (
+                  <p className="text-green-400">
+                    Verified via {certificateVerification.model || 'Gemini'}.
+                  </p>
+                )}
+                {!isVerifyingCertificate && !certificateVerification?.isValid && certificateVerification && (
+                  <p className="text-red-400">{certificateVerification.reason}</p>
+                )}
+              </div>
+              {certificateVerification?.isValid && (
+                <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-300 md:grid-cols-2">
+                  <p>Serial: {certificateVerification.extractedData.serialNumber || 'n/a'}</p>
+                  <p>Weight: {certificateVerification.extractedData.grossWeight ?? 'n/a'} g</p>
+                  <p>Purity: {certificateVerification.extractedData.purity || 'n/a'}</p>
+                  <p>Assayer: {certificateVerification.extractedData.assayer || 'n/a'}</p>
+                  <p>Date: {certificateVerification.extractedData.dateOfIssue || 'n/a'}</p>
+                  <p>File: {certificateVerification.fileName || 'n/a'}</p>
+                </div>
+              )}
+            </div>
             <input
               type="number"
               placeholder="Weight (grams)"
@@ -222,7 +434,7 @@ export default function AdminDashboard() {
             />
             <input
               type="text"
-              placeholder="Certification (optional)"
+              placeholder="Certificate reference / CID"
               value={newBatch.certification}
               onChange={e => setNewBatch({...newBatch, certification: e.target.value})}
               className="bg-gray-700 p-2 rounded"
@@ -236,7 +448,13 @@ export default function AdminDashboard() {
               />
               Public
             </label>
-            <button type="submit" className="bg-blue-600 p-2 rounded">Add Batch</button>
+            <button
+              type="submit"
+              disabled={isVerifyingCertificate || !certificateVerification?.isValid}
+              className="rounded bg-blue-600 p-2 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Add Batch
+            </button>
           </form>
         </div>
 
